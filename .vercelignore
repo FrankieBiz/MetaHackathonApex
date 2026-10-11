@@ -1,0 +1,10 @@
+.qa
+.github
+.git
+node_modules
+dist
+coverage
+tests
+.env
+.env.*
+*.tsbuildinfo
