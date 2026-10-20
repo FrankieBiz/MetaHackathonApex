@@ -3,7 +3,8 @@
 ## Architecture
 - **Backend (`backend/`)**: FastAPI service with Canvas LMS integration, Meta Llama-3 rubric deconstructor, simulation mock data fallback, and Supabase PostgreSQL persistence mirror.
 - **Frontend (`frontend/`)**: Next.js 16 Bloomberg-style academic terminal with Order Book, Equity Curve, What-If Simulator, and Task Tree.
-- **Cloud Deployment**: Render (`render.yaml`) for API, Vercel (`frontend/vercel.json`) for frontend terminal.
+- **Cloud Deployment**: Render (`render.yaml`) for API, Vercel (root `vercel.json` builds `frontend/` as a service; `frontend/next.config.ts` proxies `/api/v1/*` to `NEXT_PUBLIC_API_URL`) for frontend terminal.
+- **Legacy (`legacy_archive/`)**: The original Vite + Express app, archived and excluded from CI (`docs/legacy-vite-app.md`).
 
 ## Verification Commands
 Before finishing any task, run:
