@@ -126,7 +126,7 @@ backend/.venv/bin/python -m pytest backend -q
 uv pip check --python backend/.venv/bin/python
 ```
 
-Tests use HTTPX mock transports for Canvas, the Llama endpoint, and Supabase. They never contact a real account or require credentials. `make check` at the repository root runs these checks with the frontend suite. GitHub Actions (`.github/workflows/verify.yml`) currently runs only the legacy root app. Real Canvas account access, local model inference, and a deployed Supabase schema require a configured environment for live validation.
+Tests use HTTPX mock transports for Canvas, the Llama endpoint, and Supabase. They never contact a real account or require credentials. `make check` at the repository root runs these checks with the frontend suite. GitHub Actions (`.github/workflows/verify.yml`) runs `ruff check`, `ruff format --check`, and `pytest` inside `backend/` on every push and pull request. Real Canvas account access, local model inference, and a deployed Supabase schema require a configured environment for live validation.
 
 Runtime and development dependencies are pinned in their respective `requirements*.txt` files. To update them deliberately from the `.in` sources:
 

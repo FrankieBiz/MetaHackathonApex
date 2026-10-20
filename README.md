@@ -186,7 +186,7 @@ For live Canvas locally, export `CANVAS_API_URL` and `CANVAS_API_TOKEN` before `
 make check
 ```
 
-This runs `ruff check`, `ruff format --check`, and `pytest` for the backend, then lint, typecheck, unit tests, and a production build for the frontend. Backend tests mock Canvas, Llama, and Supabase over HTTPX transports and never need credentials.
+This runs `ruff check`, `ruff format --check`, and `pytest` for the backend, then lint, typecheck, unit tests, and a production build for the frontend. Backend tests mock Canvas, Llama, and Supabase over HTTPX transports and never need credentials. GitHub Actions ([`.github/workflows/verify.yml`](.github/workflows/verify.yml)) runs the same checks inside `backend/` and `frontend/` on every push and pull request, plus `npm audit` of the frontend's production dependencies.
 
 ## Repository map
 
