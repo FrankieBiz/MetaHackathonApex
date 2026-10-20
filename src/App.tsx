@@ -52,6 +52,7 @@ import { useNow } from "./hooks/useNow";
 import { Badge, Modal, EmptyState } from "./components/ui";
 import { MacroGoals, SprintGoals, GoalEditor } from "./components/Goals";
 import { CanvasFeed } from "./components/CanvasFeed";
+import { MetaLlamaBadge } from "./components/TopBar";
 import { Timeline, ScheduleEditor } from "./components/Timeline";
 import { FocusTimer, FocusModal } from "./components/Focus";
 import { Scratchpad, Deconstructor } from "./components/Scratchpad";
@@ -773,6 +774,7 @@ function Workspace() {
             <span className="breadcrumb-slash">/</span>
             <strong>{navItems.find((n) => n.id === view)?.title}</strong>
           </div>
+          <MetaLlamaBadge />
           <div className="topbar-right">
             <button
               className="search-trigger"

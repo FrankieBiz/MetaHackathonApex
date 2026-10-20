@@ -12,6 +12,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import { useWorkspace } from "../store";
 import { localBreakdown } from "../lib/goals";
+import { useAIEngine } from "../lib/ai";
 import type { Breakdown } from "../types";
 import { Widget, Badge } from "./ui";
 export function Scratchpad() {
@@ -80,6 +81,8 @@ export function Deconstructor({
     if (!text.trim()) return;
     setBusy(true);
     setError("");
+    useAIEngine.getState().start();
+    let reported = false;
     try {
       const response = await fetch("/api/decompose", {
         method: "POST",
@@ -87,10 +90,13 @@ export function Deconstructor({
         body: JSON.stringify({ text }),
       });
       const data = await response.json();
+      useAIEngine.getState().finish(data.telemetry ?? null, !response.ok);
+      reported = true;
       if (!response.ok)
         throw new Error(data.error || "Could not generate a breakdown.");
       setBreakdown(data);
     } catch {
+      if (!reported) useAIEngine.getState().finish(null, true);
       setBreakdown(localBreakdown(text));
       setError("AI is unavailable. Here’s an editable starter plan.");
     } finally {

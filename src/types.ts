@@ -91,4 +91,16 @@ export interface Breakdown {
   title: string;
   tasks: { title: string; minutes: number }[];
   source: "ai" | "local";
+  telemetry?: InferenceTelemetry;
+}
+export interface InferenceTelemetry {
+  model_used: string;
+  latency_ms: number;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  tokens_per_sec: number | null;
+}
+export interface EngineConfiguration {
+  provider: "meta" | "openai" | "local";
+  model: string;
 }

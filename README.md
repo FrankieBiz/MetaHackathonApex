@@ -38,7 +38,7 @@ Import the repository into Vercel and select the repository root. The checked-in
 
 The dashboard is served from Vercel's CDN. `api/health.ts`, `api/calendar.ts`, `api/canvas.ts`, and `api/decompose.ts` export the shared Express app as Node functions; they do not start the standalone listener. API paths are excluded from the SPA fallback, so navigation reloads work without swallowing API requests. Hashed assets receive immutable caching; API responses are never cached. Functions have a 60-second execution budget.
 
-No environment variables are required for goals, layouts, notes, focus, calendar sync, Canvas sync, or the local task planner. For optional AI planning, add `OPENAI_API_KEY` and optionally `OPENAI_MODEL` in **Vercel → Project Settings → Environment Variables**, then redeploy. These are server variables; never prefix either with `VITE_`.
+No environment variables are required for goals, layouts, notes, focus, calendar sync, Canvas sync, grade simulation, or the local task planner. For Meta Llama planning, add `META_API_KEY`, optionally `META_BASE_URL` and `META_MODEL`, in **Vercel → Project Settings → Environment Variables**, then redeploy. The existing OpenAI integration remains available with `OPENAI_API_KEY` and optionally `OPENAI_MODEL`. These are server variables; never prefix them with `VITE_`.
 
 After deployment, open `/api/health` to confirm `status: "ok"`, then import a calendar in Settings. The `ai` field reports whether the server has an AI key. Live Canvas and AI validation require your own credentials.
 
@@ -53,6 +53,7 @@ See [Vercel's Vite guide](https://vercel.com/docs/frameworks/frontend/vite) and 
 - **Canvas:** Settings accepts an iCal subscription or `.ics` upload. The parser supports line folding, all-day events, embedded timezones, recurrence, exceptions, and exclusion dates. Recurring events are bounded to a rolling 90-day horizon. Live feeds refresh every 15 minutes while the current browser session stays open. Subscription URLs stay in memory; reconnect after a page reload. Imported calendar data persists.
 - **Canvas API:** Supply your `school.instructure.com` domain and personal access token. The server reads active courses, paginated course assignments (including your submission status and rubric), and upcoming events. Tokens are sent over the same-origin API, used for that request, and never stored. API sync is manual; the token is cleared after a successful sync. Custom Canvas domains require an explicit server-side allowlist change.
 - **Assignment queue:** Filter overdue, next 24 hours, this week, upcoming beyond seven days, or completed. Inspect descriptions, rubrics, and attachment links; mark an assignment complete or convert it into a sprint with three starter tasks. Conversion is idempotent.
+- **What-if grades:** Open **What-if grade simulator** in the Canvas feed, or use an assignment's chart button. Select an unfinished, point-bearing assignment in the Order Book and drag its score from 0–100%. The chart, projected grade, and Margin of Safety update immediately. Starting grade (85%), points already graded (300), and target (80%) are editable scenario assumptions; they are not imported Canvas grades. Calculations use assignment points within the selected course, assume the starting grade for other unfinished assignments, and exclude category weights, extra credit, completed work beyond the entered baseline, and coursework missing from the feed. A scenario never changes submissions or completion flags.
 - **Schedule:** Daily focus flow, seven-day calendar, and horizontal timeline merge assignments, commitments, and linked goal sessions. Add, edit, or delete your own time blocks, or start focus from a scheduled session. Imported calendar events stay tied to their source.
 - **Focus:** Live 15/25/45/60-minute sessions persist across page reloads. Completion records elapsed minutes and feeds productivity metrics and activity. Closing the dialog keeps the timer running.
 - **Scratchpad:** Markdown editing and preview with immediate local persistence.
@@ -62,7 +63,21 @@ Demo data is optional and anchored to your first visit. Connecting Canvas replac
 
 ## Optional AI
 
-Set **`OPENAI_API_KEY`** in the server’s environment (never in a `VITE_` variable). Optionally set **`OPENAI_MODEL`**, which defaults to `gpt-4.1-mini`. Do not put credentials in source control. The server uses the [OpenAI Responses API with structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses) and `store: false`. Prompts are sent only when the user requests a breakdown. With no key, the deconstructor produces a clearly labeled local starter plan; network failures fall back to this plan. Each of the three steps is editable before adding it to a sprint.
+Set **`META_API_KEY`** in the server environment to enable Meta Model API / Llama. Configuration:
+
+| Variable        | Default / purpose                                                                                             |
+| --------------- | ------------------------------------------------------------------------------------------------------------- |
+| `META_API_KEY`  | Required for Meta inference; takes priority over an OpenAI key                                                |
+| `META_BASE_URL` | `https://api.llama.com/compat/v1` (OpenAI-compatible base URL, without `/chat/completions`)                   |
+| `META_MODEL`    | `Llama-3.3-70B-Instruct`; alternatively `Llama-3.1-8B-Instruct` or the exact model ID served by your endpoint |
+
+Meta's [OpenAI-compatible configuration example](https://dev.meta.ai/llama/resources/cookbook/documentlens) documents the compatibility base URL. Model availability depends on the endpoint: configure a deployment serving Llama 3.3/3.1 or set `META_MODEL` to an available model. The server sends Chat Completions requests with JSON output and validates the three-step plan. Credentials stay on the server and are never returned through health or telemetry endpoints.
+
+Without a Meta key, **`OPENAI_API_KEY`** enables the existing [OpenAI Responses API with structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses), `store: false`, and optional **`OPENAI_MODEL`** (default `gpt-4.1-mini`). Never use `VITE_` for API credentials or put credentials in source control. Prompts are sent only when the user requests a breakdown. With no key, the deconstructor produces a clearly labeled local starter plan; network failures fall back to this plan. Each of the three steps is editable before adding it to a sprint.
+
+Every `POST /api/decompose` plan includes `telemetry: { model_used, latency_ms, prompt_tokens, completion_tokens, tokens_per_sec }`. The header pill updates from the latest request and shows configured, running, measured, local, or unavailable status. `model_used` uses the served model ID when supplied; missing token usage is `null` and displayed as `—`. Throughput is completion tokens divided by total API round-trip seconds, including request/prefill latency, rather than decode-only speed. Failed inference responses also include elapsed latency and any available usage; local plans report zero tokens and identify themselves as `local-starter-plan`. Telemetry is session-only and excluded from workspace backups.
+
+For a judge walkthrough, explore the demo workspace, open the grade simulator, and move the first assignment's slider between 0% and 100%. Then run **Task deconstructor → Break it down** with a configured Meta endpoint to populate the Llama badge with measured throughput and latency. API tests use mocks; a live Meta request requires your own credentials.
 
 ## Source map
 
@@ -74,6 +89,10 @@ src/data/presets.ts           Snap-to-grid layout configurations
 src/data/seed.ts              Sample data anchored to first visit
 src/components/Goals.tsx      Macro goals, weekly sprints, goal editor
 src/components/CanvasFeed.tsx Assignment queue and inspector
+src/components/TrajectoryChart.tsx Order Book, what-if slider, grade trajectory
+src/components/TopBar.tsx     Live Meta Llama telemetry pill
+src/lib/grades.ts            Course-scoped, point-weighted grade scenarios
+src/lib/ai.ts                Session-only inference telemetry state
 src/components/Timeline.tsx   Three schedule views and time blocks
 src/components/Focus.tsx      Live focus timer and focus room
 src/components/Scratchpad.tsx Markdown notes and task deconstructor

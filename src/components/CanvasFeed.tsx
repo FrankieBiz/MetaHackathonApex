@@ -8,12 +8,14 @@ import {
   ExternalLink,
   FileText,
   RefreshCw,
+  TrendingUp,
 } from "lucide-react";
 import { useWorkspace } from "../store";
 import type { CanvasAssignment } from "../types";
 import { countdown, DAY, formatDate, formatTime } from "../lib/dates";
 import { useNow } from "../hooks/useNow";
 import { Widget, Badge, Modal, EmptyState } from "./ui";
+import { TrajectoryChart } from "./TrajectoryChart";
 export function CanvasFeed({
   onConnect,
   toast,
@@ -28,7 +30,8 @@ export function CanvasFeed({
     goals = useWorkspace((s) => s.goals),
     connection = useWorkspace((s) => s.connection);
   const [filter, setFilter] = useState("week"),
-    [selected, setSelected] = useState<CanvasAssignment>();
+    [selected, setSelected] = useState<CanvasAssignment>(),
+    [simulation, setSimulation] = useState<string | null>(null);
   const now = useNow(60_000);
   const active = assignments.filter((a) => !a.completed);
   const filtered = assignments
@@ -96,6 +99,17 @@ export function CanvasFeed({
             <RefreshCw size={13} />
           </button>
         </div>
+        <button
+          className="grade-simulator-launch"
+          onClick={() => setSimulation("")}
+        >
+          <TrendingUp size={16} />
+          <span>
+            <strong>What-if grade simulator</strong>
+            <span>Drag a score. See your margin of safety.</span>
+          </span>
+          <ArrowUpRight size={15} />
+        </button>
         <div className="assignment-list">
           {filtered.map((a) => {
             const urgent = new Date(a.dueAt).getTime() - now.getTime() < DAY;
@@ -118,6 +132,16 @@ export function CanvasFeed({
                   </div>
                 </button>
                 <div className="assignment-right">
+                  {!a.completed && a.points !== null && a.points > 0 && (
+                    <button
+                      className="icon-button"
+                      aria-label={`Simulate grade for ${a.title}`}
+                      title="Simulate grade"
+                      onClick={() => setSimulation(a.id)}
+                    >
+                      <TrendingUp size={14} />
+                    </button>
+                  )}
                   <span
                     className={`due-label mono ${a.completed ? "emerald" : urgent ? "amber" : ""}`}
                   >
@@ -187,6 +211,18 @@ export function CanvasFeed({
           </button>
         </div>
       </Widget>
+      {simulation !== null && (
+        <Modal
+          title="What-if grade simulator"
+          wide
+          onClose={() => setSimulation(null)}
+        >
+          <TrajectoryChart
+            assignments={assignments}
+            initialAssignmentId={simulation || undefined}
+          />
+        </Modal>
+      )}
       {selected && (
         <AssignmentModal
           assignment={assignments.find((a) => a.id === selected.id) ?? selected}

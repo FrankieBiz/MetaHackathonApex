@@ -2,6 +2,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
   afterAll,
+  afterEach,
   beforeAll,
   beforeEach,
   describe,
@@ -12,9 +13,14 @@ import {
 import handler from "../api/health";
 import { requestPublic } from "../server/network";
 import { syncCanvas } from "../server/canvas";
+import { decompose, idleTelemetry, InferenceError } from "../server/ai";
 
 vi.mock("../server/network.js", () => ({ requestPublic: vi.fn() }));
 vi.mock("../server/canvas.js", () => ({ syncCanvas: vi.fn() }));
+vi.mock("../server/ai.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../server/ai")>()),
+  decompose: vi.fn(),
+}));
 
 let server: Server;
 let origin: string;
@@ -28,6 +34,7 @@ afterAll(async () => {
   server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
+afterEach(() => vi.unstubAllEnvs());
 const post = (path: string, body: unknown) =>
   fetch(`${origin}${path}`, {
     method: "POST",
@@ -36,6 +43,57 @@ const post = (path: string, body: unknown) =>
   });
 
 describe("Vercel API handler", () => {
+  it("reports Meta configuration without exposing credentials", async () => {
+    vi.stubEnv("META_API_KEY", "test-fixture-secret");
+    vi.stubEnv("META_MODEL", "Llama-3.1-8B-Instruct");
+    const response = await fetch(`${origin}/api/health`);
+    const data = await response.json();
+    expect(data).toMatchObject({
+      ai: true,
+      engine: { provider: "meta", model: "Llama-3.1-8B-Instruct" },
+    });
+    expect(JSON.stringify(data)).not.toContain("test-fixture-secret");
+  });
+
+  it("returns telemetry with every successful decomposition", async () => {
+    const telemetry = {
+      model_used: "Llama-3.3-70B-Instruct",
+      latency_ms: 500,
+      prompt_tokens: 240,
+      completion_tokens: 100,
+      tokens_per_sec: 200,
+    };
+    vi.mocked(decompose).mockResolvedValue({
+      title: "Plan",
+      tasks: [{ title: "Start", minutes: 20 }],
+      source: "ai",
+      telemetry,
+    });
+    const response = await post("/api/decompose", { text: "Build an app" });
+    expect(response.status).toBe(200);
+    expect((await response.json()).telemetry).toEqual(telemetry);
+  });
+
+  it("preserves inference telemetry when the API fails", async () => {
+    const telemetry = {
+      ...idleTelemetry("Llama-3.3-70B-Instruct"),
+      latency_ms: 130,
+      prompt_tokens: null,
+      completion_tokens: null,
+      tokens_per_sec: null,
+    };
+    vi.mocked(decompose).mockRejectedValue(new InferenceError(telemetry));
+    const response = await post("/api/decompose", { text: "Build an app" });
+    expect(response.status).toBe(503);
+    expect((await response.json()).telemetry).toEqual(telemetry);
+  });
+
+  it("returns telemetry for invalid text without attempting inference", async () => {
+    const response = await post("/api/decompose", { text: " " });
+    expect(response.status).toBe(400);
+    expect((await response.json()).telemetry).toEqual(idleTelemetry());
+    expect(decompose).not.toHaveBeenCalled();
+  });
   it("exports a handler without a listener and lets Express parse bodies", async () => {
     expect(typeof handler.listen).toBe("function");
     const response = await fetch(`${origin}/api/health`);
@@ -94,6 +152,7 @@ describe("Vercel API handler", () => {
       text: "x".repeat(40_000),
     });
     expect(oversized.status).toBe(400);
+    expect((await oversized.json()).telemetry).toEqual(idleTelemetry());
     expect(requestPublic).not.toHaveBeenCalled();
   });
 

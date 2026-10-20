@@ -10,7 +10,12 @@ import { fileURLToPath } from "node:url";
 import { parseCalendar } from "../src/lib/calendar.js";
 import { requestPublic } from "./network.js";
 import { syncCanvas } from "./canvas.js";
-import { decompose } from "./ai.js";
+import {
+  decompose,
+  engineConfiguration,
+  idleTelemetry,
+  InferenceError,
+} from "./ai.js";
 export function createApp({
   serveStatic = false,
   trustProxy = process.env.VERCEL === "1",
@@ -37,8 +42,13 @@ export function createApp({
       limit: 60,
       standardHeaders: "draft-8",
       legacyHeaders: false,
-      message: {
-        error: "Too many requests. Please try again in a few minutes.",
+      handler: (req, res, _next, options) => {
+        res.status(options.statusCode).json({
+          error: "Too many requests. Please try again in a few minutes.",
+          ...(req.originalUrl.split("?")[0] === "/api/decompose"
+            ? { telemetry: idleTelemetry() }
+            : {}),
+        });
       },
     }),
   );
@@ -48,7 +58,11 @@ export function createApp({
     next();
   });
   app.get("/api/health", (_req, res) =>
-    res.json({ status: "ok", ai: !!process.env.OPENAI_API_KEY }),
+    res.json({
+      status: "ok",
+      ai: engineConfiguration().provider !== "local",
+      engine: engineConfiguration(),
+    }),
   );
   const stringField = (req: Request, key: string, max: number) => {
     const value = req.body?.[key];
@@ -88,15 +102,32 @@ export function createApp({
       limit: 10,
       standardHeaders: "draft-8",
       legacyHeaders: false,
-      message: { error: "Planning limit reached. Try again in a few minutes." },
+      message: {
+        error: "Planning limit reached. Try again in a few minutes.",
+        telemetry: idleTelemetry(),
+      },
     }),
     async (req, res) => {
+      let text: string;
       try {
-        res.json(await decompose(stringField(req, "text", 12000)));
+        text = stringField(req, "text", 12000);
       } catch {
+        res
+          .status(400)
+          .json({
+            error: "Provide valid text (1–12000 characters).",
+            telemetry: idleTelemetry(),
+          });
+        return;
+      }
+      try {
+        res.json(await decompose(text));
+      } catch (error) {
         res.status(503).json({
           error:
             "AI planning is unavailable. Use the local starter plan or try again.",
+          telemetry:
+            error instanceof InferenceError ? error.telemetry : idleTelemetry(),
         });
       }
     },
@@ -116,15 +147,14 @@ export function createApp({
       res.sendFile(resolve(dist, "index.html"));
     });
   }
-  app.use(
-    (error: unknown, _req: Request, res: Response, next: NextFunction) => {
-      void error;
-      void next;
-      res
-        .status(400)
-        .json({ error: "Invalid request. Check your input and try again." });
-    },
-  );
+  app.use((error: unknown, req: Request, res: Response, next: NextFunction) => {
+    void error;
+    void next;
+    res.status(400).json({
+      error: "Invalid request. Check your input and try again.",
+      ...(req.path === "/api/decompose" ? { telemetry: idleTelemetry() } : {}),
+    });
+  });
 
   return app;
 }
