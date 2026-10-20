@@ -6,12 +6,13 @@ from statistics import pstdev
 
 from openai import AsyncOpenAI
 
-from .ai_engine import deconstruct_assignment, generate_study_recommendation
+from .ai_engine import deconstruct_assignment, generate_study_recommendation, task_id
 from .canvas_client import CanvasClient, CanvasSnapshot
 from .config import Settings
 from .models import (
     AssignmentModel,
     InferenceTelemetry,
+    StudyInsertRequest,
     SubTaskNode,
     SubTaskUpdate,
     TerminalMetrics,
@@ -100,7 +101,12 @@ class TerminalService:
         previous_recommendations = (
             {node.id: node for node in previous.study_recommendations} if previous else {}
         )
-        recommendations = []
+        course_ids = {c.id for c in snapshot.courses}
+        recommendations = [
+            node.model_copy(deep=True)
+            for node in previous_recommendations.values()
+            if node.course_id in course_ids and node.id != task_id(node.course_id, "rapid-study")
+        ]
         for course in snapshot.courses:
             assignments = [a for a in snapshot.assignments if a.course_id == course.id]
             if any(a.status != "completed" for a in assignments):
@@ -217,6 +223,34 @@ class TerminalService:
             self._recalculate(self._state)
             await self._persist()
             return [node.model_copy(deep=True) for node in nodes]
+
+    async def insert_study(self, request: StudyInsertRequest) -> TerminalState:
+        async with self._lock:
+            await self._sync()
+            assert self._state is not None
+            if not any(c.id == request.course_id for c in self._state.courses):
+                raise KeyError(request.course_id)
+            existing = {n.id for n in self._state.study_recommendations}
+            for block in request.recommended_blocks:
+                title = " ".join(block.title.split())
+                identifier = task_id(request.course_id, f"study-sprint:{title.casefold()}")
+                if identifier in existing:
+                    continue
+                self._state.study_recommendations.append(
+                    SubTaskNode(
+                        id=identifier,
+                        assignment_id=None,
+                        course_id=request.course_id,
+                        title=title,
+                        estimated_minutes=25,
+                        is_study_recommendation=True,
+                    )
+                )
+                existing.add(identifier)
+                self._dirty[self._state.metrics.demo_mode].add(identifier)
+            self._recalculate(self._state)
+            await self._persist()
+            return self._state.model_copy(deep=True)
 
     async def patch(self, identifier: str, patch: SubTaskUpdate) -> TerminalState:
         async with self._lock:

@@ -326,6 +326,8 @@ async def test_cors_and_openapi(api, terminal):
         "/api/sync",
         "/api/triage/{assignment_id}",
         "/api/v1/subtasks/{subtask_id}",
+        "/api/v1/triage/study",
+        "/api/v1/triage/study/insert",
         "/api/subtasks/{subtask_id}",
     }
     assert paths["/api/subtasks/{subtask_id}"]["patch"]["deprecated"] is True

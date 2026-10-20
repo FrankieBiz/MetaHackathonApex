@@ -17,7 +17,8 @@ import {
   type QueueEntry,
 } from "@/lib/engine";
 import { countdown, score as fmtScore } from "@/lib/format";
-import { useTerminal } from "@/store/terminal";
+import { activeCourseOf, useTerminal } from "@/store/terminal";
+import { studyOpportunity } from "@/lib/study";
 import type { Assignment } from "@/types";
 
 const TIER_COLOR: Record<PriorityTier, string> = {
@@ -155,6 +156,9 @@ function PriorityCell({ score, max }: { score: number; max: number }) {
 }
 
 export function OrderBook() {
+  const courses = useTerminal((s) => s.data?.courses);
+  const activeCourse = useTerminal(activeCourseOf);
+  const selectCourse = useTerminal((s) => s.selectCourse);
   const assignments = useTerminal((s) => s.data?.assignments ?? NO_ASSIGNMENTS);
   const selectedId = useTerminal((s) => s.selectedId);
   const select = useTerminal((s) => s.select);
@@ -220,6 +224,28 @@ export function OrderBook() {
       }
     >
       <div className="flex min-h-full flex-col">
+        <nav
+          aria-label="Active course for study triage"
+          className="flex flex-wrap gap-2 border-b border-line px-2.5 py-2"
+        >
+          {courses?.map((course) => {
+            const opportunity = studyOpportunity(assignments, course.id, now);
+            return (
+              <Key
+                key={course.id}
+                active={activeCourse?.id === course.id}
+                aria-pressed={activeCourse?.id === course.id}
+                title={opportunity ?? course.name}
+                onClick={() => selectCourse(course.id)}
+              >
+                {course.course_code}
+                {opportunity && (
+                  <span className="ml-1 text-accent"> · STUDY</span>
+                )}
+              </Key>
+            );
+          })}
+        </nav>
         <table className="w-full border-collapse text-[12px]">
           <caption className="sr-only">
             Open assignments sorted by priority score: weight times points over

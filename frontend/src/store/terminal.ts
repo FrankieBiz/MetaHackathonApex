@@ -38,6 +38,7 @@ import type {
   DataOrigin,
   GradePoint,
   SubTaskNode,
+  StudyTriagePlan,
   TerminalEvent,
   TerminalState,
 } from "@/types";
@@ -58,6 +59,11 @@ interface TerminalStore {
   /** Ctrl+Shift+D: stay on the simulation desk and stop contacting the backend. */
   simulationPinned: boolean;
   selectedId: string | null;
+  activeCourseId: string | null;
+  studyPlans: Record<string, StudyTriagePlan>;
+  studying: Record<string, true>;
+  insertingStudy: Record<string, true>;
+  studyErrors: Record<string, string>;
   triaging: Record<string, true>;
   syncing: boolean;
   /** Held in memory only — never persisted or written to storage. */
@@ -73,6 +79,9 @@ interface TerminalStore {
   refresh: () => Promise<boolean>;
   sync: () => Promise<void>;
   select: (id: string | null) => void;
+  selectCourse: (courseId: string) => void;
+  generateStudyTriage: (courseId?: string) => Promise<void>;
+  insertStudyBlocks: (courseId: string) => Promise<void>;
   triage: (assignmentId: string) => Promise<void>;
   toggle: (assignmentId: string, subtaskId: string, value: boolean) => void;
   logTime: (assignmentId: string, subtaskId: string, delta: number) => void;
@@ -92,6 +101,31 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Ids minted by the local planner; the backend has never seen them. */
 const LOCAL_ID = /^local-/;
+
+export function activeCourseOf(
+  state: Pick<TerminalStore, "data" | "selectedId" | "activeCourseId">,
+) {
+  const selected = state.data?.assignments.find(
+    (a) => a.id === state.selectedId,
+  );
+  return (
+    state.data?.courses.find(
+      (c) => c.id === (selected?.course_id ?? state.activeCourseId),
+    ) ??
+    state.data?.courses[0] ??
+    null
+  );
+}
+
+/** Course study work has no assignment and shares the normal checkbox/time-log path. */
+const isStudyDeck = (id: string) => id.startsWith("study:");
+const updateStudy = (
+  data: TerminalState,
+  update: (nodes: SubTaskNode[]) => SubTaskNode[],
+) => ({
+  ...data,
+  study_recommendations: update(data.study_recommendations ?? []),
+});
 
 // ------------------------------------------------------------- storage
 
@@ -171,6 +205,7 @@ let booted = false;
 let writeChain: Promise<void> = Promise.resolve();
 /** Bumped on every change to `data`; lets slow responses detect they are stale. */
 let revision = 0;
+let datasetVersion = 0;
 /** Detached edits, merged per subtask so only the latest value replays. */
 const queue = new Map<string, Patch>();
 
@@ -194,13 +229,31 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
 
   /** Keeps the selection when the new data has it (fixtures share IDs everywhere). */
   const keepSelection = (data: TerminalState) => {
-    const { selectedId } = get();
+    const { selectedId, activeCourseId } = get();
+    if (
+      !selectedId &&
+      activeCourseId &&
+      data.courses.some((c) => c.id === activeCourseId)
+    ) {
+      return (
+        data.assignments.find(
+          (a) => a.course_id === activeCourseId && a.status !== "completed",
+        )?.id ?? null
+      );
+    }
     return selectedId && data.assignments.some((a) => a.id === selectedId)
       ? selectedId
       : topOfQueue(data);
   };
 
   const adopt = (state: TerminalState) => {
+    if (
+      get().origin !== "backend" ||
+      get().data?.metrics.demo_mode !== state.metrics.demo_mode
+    ) {
+      datasetVersion += 1;
+      set({ studyPlans: {}, studyErrors: {} });
+    }
     revision += 1;
     const data = withLedger(state, Date.now());
     set({
@@ -217,12 +270,15 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
    * saved session was restored.
    */
   const simulate = (dataset: TerminalState) => {
+    datasetVersion += 1;
     const restored = loadSandbox(Date.now());
     const local = restored ?? dataset;
     set({
       origin: "sandbox",
       mode: "offline",
       selectedId: keepSelection(local),
+      studyPlans: {},
+      studyErrors: {},
     });
     commit(local);
     return restored !== null;
@@ -346,6 +402,11 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
     origin: "sandbox",
     simulationPinned: false,
     selectedId: null,
+    activeCourseId: null,
+    studyPlans: {},
+    studying: {},
+    insertingStudy: {},
+    studyErrors: {},
     triaging: {},
     syncing: false,
     credentials: null,
@@ -487,12 +548,158 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
       }
     },
 
-    select: (id) => set({ selectedId: id }),
+    select: (id) =>
+      set({
+        selectedId: id,
+        activeCourseId:
+          get().data?.assignments.find((a) => a.id === id)?.course_id ??
+          get().activeCourseId,
+      }),
+
+    selectCourse: (courseId) => {
+      if (!get().data?.courses.some((c) => c.id === courseId)) return;
+      set({
+        activeCourseId: courseId,
+        selectedId:
+          get().data?.assignments.find(
+            (a) => a.course_id === courseId && a.status !== "completed",
+          )?.id ?? null,
+      });
+    },
+
+    generateStudyTriage: async (courseId) => {
+      const course = courseId
+        ? get().data?.courses.find((c) => c.id === courseId)
+        : activeCourseOf(get());
+      if (
+        !course ||
+        get().studying[course.id] ||
+        useInference.getState().status === "running"
+      )
+        return;
+      const fail = (text: string) => {
+        set((s) => ({ studyErrors: { ...s.studyErrors, [course.id]: text } }));
+        log("error", text);
+      };
+      if (!isRemote(get().mode)) {
+        fail(
+          "Connect to the backend to scan course materials and generate a study sprint.",
+        );
+        return;
+      }
+      const version = datasetVersion;
+      set((s) => ({
+        studying: { ...s.studying, [course.id]: true },
+        studyErrors: { ...s.studyErrors, [course.id]: "" },
+      }));
+      useInference.getState().start();
+      try {
+        const assignments = get().data!.assignments.filter(
+          (a) => a.course_id === course.id,
+        );
+        // Upcoming work first, then recent graded work, bounded by the API contract.
+        assignments.sort(
+          (a, b) =>
+            Number(a.status === "completed") -
+              Number(b.status === "completed") ||
+            (a.status === "completed" ? -1 : 1) *
+              ((Date.parse(a.due_at ?? "") || 0) -
+                (Date.parse(b.due_at ?? "") || 0)),
+        );
+        const plan = await api.studyTriage({
+          course_id: course.id,
+          course_name: course.name,
+          syllabus_text: (course.syllabus ?? "").slice(0, 100_000),
+          recent_assignments: assignments.slice(0, 50).map((a) => ({
+            title: a.title,
+            description: (a.description ?? "").slice(0, 20_000),
+            score: a.score ?? null,
+            points_possible: a.points_possible,
+            weight: a.weight,
+            due_at: a.due_at,
+            status: a.status,
+          })),
+        });
+        if (version !== datasetVersion) {
+          useInference.getState().finish(null, "unavailable");
+          return;
+        }
+        set((s) => ({ studyPlans: { ...s.studyPlans, [course.id]: plan } }));
+        useInference.getState().finish(plan.inference_telemetry, plan.source);
+        log(
+          "ok",
+          `Study sprint ready for ${course.course_code}: ${plan.recommended_blocks.length} × 25m blocks.`,
+        );
+      } catch (error) {
+        useInference.getState().finish(null, "unavailable");
+        if (version === datasetVersion)
+          fail(`Study triage failed: ${message(error)}`);
+      } finally {
+        set((s) => {
+          const next = { ...s.studying };
+          delete next[course.id];
+          return { studying: next };
+        });
+      }
+    },
+
+    insertStudyBlocks: async (courseId) => {
+      const plan = get().studyPlans[courseId];
+      if (!plan || get().insertingStudy[courseId]) return;
+      if (!isRemote(get().mode)) {
+        set((s) => ({
+          studyErrors: {
+            ...s.studyErrors,
+            [courseId]: "Reconnect to save these study blocks.",
+          },
+        }));
+        return;
+      }
+      const version = datasetVersion;
+      set((s) => ({
+        insertingStudy: { ...s.insertingStudy, [courseId]: true },
+        studyErrors: { ...s.studyErrors, [courseId]: "" },
+        pendingWrites: s.pendingWrites + 1,
+      }));
+      writeChain = writeChain
+        .then(async () => {
+          if (version !== datasetVersion) return;
+          const state = await api.insertStudy(
+            courseId,
+            plan.recommended_blocks,
+          );
+          if (version !== datasetVersion) return;
+          adopt(state);
+          log(
+            "ok",
+            `Study blocks saved to ${state.courses.find((c) => c.id === courseId)?.course_code ?? courseId}.`,
+          );
+        })
+        .catch((error) => {
+          if (version !== datasetVersion) return;
+          const text = `Could not insert study blocks: ${message(error)}`;
+          set((s) => ({ studyErrors: { ...s.studyErrors, [courseId]: text } }));
+          log("error", text);
+        })
+        .finally(() => {
+          set((s) => {
+            const next = { ...s.insertingStudy };
+            delete next[courseId];
+            return { insertingStudy: next, pendingWrites: s.pendingWrites - 1 };
+          });
+        });
+      await writeChain;
+    },
 
     triage: async (assignmentId) => {
       const { triaging, data } = get();
       const assignment = data?.assignments.find((a) => a.id === assignmentId);
-      if (triaging[assignmentId] || !assignment) return;
+      if (
+        triaging[assignmentId] ||
+        !assignment ||
+        useInference.getState().status === "running"
+      )
+        return;
       useInference.getState().start();
       set((s) => ({
         selectedId: assignmentId,
@@ -572,9 +779,11 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
       const before = data.assignments.find(
         (a) => a.id === assignmentId,
       )?.status;
-      const next = updateSubtasks(data, assignmentId, (nodes) =>
-        setCompletion(nodes, subtaskId, value),
-      );
+      const change = (nodes: SubTaskNode[]) =>
+        setCompletion(nodes, subtaskId, value);
+      const next = isStudyDeck(assignmentId)
+        ? updateStudy(data, change)
+        : updateSubtasks(data, assignmentId, change);
       commit(next);
       const after = next.assignments.find((a) => a.id === assignmentId)?.status;
       if (before !== "completed" && after === "completed") {
@@ -586,14 +795,18 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
     logTime: (assignmentId, subtaskId, delta) => {
       const { data } = get();
       if (!data) return;
-      const next = updateSubtasks(data, assignmentId, (nodes) =>
-        logMinutes(nodes, subtaskId, delta),
-      );
+      const change = (nodes: SubTaskNode[]) =>
+        logMinutes(nodes, subtaskId, delta);
+      const next = isStudyDeck(assignmentId)
+        ? updateStudy(data, change)
+        : updateSubtasks(data, assignmentId, change);
       commit(next);
       const assignment = next.assignments.find((a) => a.id === assignmentId);
-      const actual = assignment
-        ? findNode(assignment.subtasks, subtaskId)?.actual_minutes
-        : undefined;
+      const actual = isStudyDeck(assignmentId)
+        ? findNode(next.study_recommendations ?? [], subtaskId)?.actual_minutes
+        : assignment
+          ? findNode(assignment.subtasks, subtaskId)?.actual_minutes
+          : undefined;
       if (actual === undefined) return;
       push("time log", subtaskId, { actual_minutes: actual });
     },
@@ -602,6 +815,8 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
 
     resetSandbox: () => {
       if (isRemote(get().mode)) return;
+      datasetVersion += 1;
+      set({ studyPlans: {}, studyErrors: {} });
       queue.clear();
       set({ origin: "sandbox", queuedEdits: 0 });
       const fresh = createMockState(Date.now());

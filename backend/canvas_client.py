@@ -31,6 +31,10 @@ class _PlainText(HTMLParser):
             self.hidden += 1
         if tag in ("br", "p", "div", "li") and not self.hidden:
             self.parts.append("\n")
+        if tag == "a" and not self.hidden:
+            href = dict(attrs).get("href", "") or ""
+            if ".pdf" in href.lower():
+                self.parts.append(f" {href} ")
 
     def handle_endtag(self, tag: str) -> None:
         if tag in ("script", "style"):
@@ -259,4 +263,7 @@ class CanvasClient:
             description=description,
             status="completed" if completed or graded else "pending",
             graded=graded,
+            score=max(0.0, float(submission["score"]))
+            if submission.get("score") is not None and not submission.get("excused")
+            else None,
         )

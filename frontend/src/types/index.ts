@@ -5,6 +5,7 @@ export type AssignmentStatus = "pending" | "in_progress" | "completed";
 export interface SubTaskNode {
   id: string;
   assignment_id: string;
+  course_id?: string | null;
   parent_id: string | null;
   title: string;
   estimated_minutes: number;
@@ -30,6 +31,7 @@ export interface Assignment {
    * is submitted, or whose tasks are all checked, is completed but not graded.
    */
   graded: boolean;
+  score?: number | null;
   priority_score: number;
   subtasks: SubTaskNode[];
 }
@@ -65,7 +67,34 @@ export interface TerminalMetrics {
 export interface TerminalState {
   courses: Course[];
   assignments: Assignment[];
+  study_recommendations?: SubTaskNode[];
   metrics: TerminalMetrics;
+}
+
+export interface StudyBlock {
+  title: string;
+  estimated_minutes: 25;
+}
+
+export interface StudyTriageRequest {
+  course_id: string;
+  course_name: string;
+  recent_assignments: (Pick<
+    Assignment,
+    "title" | "score" | "points_possible" | "weight" | "due_at" | "status"
+  > & {
+    description: string;
+  })[];
+  syllabus_text: string;
+}
+
+export interface StudyTriagePlan {
+  course_id: string;
+  detected_triggers: string[];
+  focus_topics: string[];
+  recommended_blocks: StudyBlock[];
+  inference_telemetry: import("@/store/inference").InferenceTelemetry;
+  source: "ai" | "local";
 }
 
 /**

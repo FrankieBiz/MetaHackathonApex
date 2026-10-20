@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRestoreFocus } from "@/components/ui";
 import { rankQueue } from "@/lib/engine";
-import { isRemote, useTerminal } from "@/store/terminal";
+import { activeCourseOf, isRemote, useTerminal } from "@/store/terminal";
 
 interface Command {
   id: string;
@@ -38,6 +38,7 @@ function PaletteDialog({
   const data = useTerminal((s) => s.data);
   const mode = useTerminal((s) => s.mode);
   const selectedId = useTerminal((s) => s.selectedId);
+  const activeCourseId = useTerminal((s) => s.activeCourseId);
   const [query, setQuery] = useState("");
   useRestoreFocus();
   const [active, setActive] = useState(0);
@@ -47,6 +48,7 @@ function PaletteDialog({
   const commands = useMemo<Command[]>(() => {
     const store = useTerminal.getState();
     const selected = data?.assignments.find((a) => a.id === selectedId);
+    const course = activeCourseOf({ data, selectedId, activeCourseId });
     const actions: Command[] = [
       {
         id: "sync",
@@ -75,6 +77,14 @@ function PaletteDialog({
         run: () => void store.toggleSimulation(),
       },
     ];
+    if (course) {
+      actions.push({
+        id: "study-triage",
+        label: `GENERATE STUDY TRIAGE · ${course.course_code}`,
+        hint: "Scan syllabus, exam guides, and recent scores",
+        run: () => void store.generateStudyTriage(course.id),
+      });
+    }
     // Replacing an existing tree needs the order book's two-step confirm.
     if (selected && !selected.subtasks.length) {
       actions.push({
@@ -106,7 +116,7 @@ function PaletteDialog({
         }))
       : [];
     return [...actions, ...jumps];
-  }, [data, mode, selectedId, onResetLayout, openedAt]);
+  }, [data, mode, selectedId, activeCourseId, onResetLayout, openedAt]);
 
   const results = useMemo(() => {
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);

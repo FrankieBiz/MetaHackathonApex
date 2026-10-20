@@ -8,6 +8,9 @@ import type {
   Assignment,
   Course,
   SubTaskNode,
+  StudyBlock,
+  StudyTriagePlan,
+  StudyTriageRequest,
   TerminalMetrics,
   TerminalState,
 } from "@/types";
@@ -102,6 +105,7 @@ const num = (fallback: number) =>
 const RawSubtask = z.object({
   id,
   assignment_id: id.optional().catch(undefined),
+  course_id: id.nullable().optional().catch(null),
   parent_id: id.nullable().optional().catch(null),
   title: z.string().catch("Untitled task"),
   estimated_minutes: num(30),
@@ -125,6 +129,7 @@ const RawAssignment = z.object({
   description: z.string().nullable().catch(null),
   status: z.enum(["pending", "in_progress", "completed"]).catch("pending"),
   graded: z.boolean().catch(false),
+  score: z.number().finite().nonnegative().nullable().catch(null),
   priority_score: num(0),
   subtasks: z.array(z.unknown()).catch([]),
 });
@@ -192,6 +197,7 @@ export function buildTree(raw: unknown, assignmentId: string): SubTaskNode[] {
       .map((node) => ({
         id: node.id,
         assignment_id: node.assignment_id ?? assignmentId,
+        course_id: node.course_id,
         parent_id: parent,
         title: node.title,
         estimated_minutes: node.estimated_minutes,
@@ -241,7 +247,12 @@ export function normalizeState(raw: unknown): TerminalState {
   const metrics: TerminalMetrics = parsedMetrics.success
     ? parsedMetrics.data
     : RawMetrics.parse({});
-  return { courses, assignments, metrics };
+  return {
+    courses,
+    assignments,
+    metrics,
+    study_recommendations: buildTree(body.study_recommendations, "study"),
+  };
 }
 
 /** Triage responses may be a bare node list or wrapped in an object. */
@@ -298,6 +309,31 @@ export interface CanvasCredentials {
   baseUrl: string;
 }
 
+const Telemetry = z.object({
+  model_used: z.string(),
+  latency_ms: z.number().int().nonnegative(),
+  prompt_tokens: z.number().int().nonnegative().nullable(),
+  completion_tokens: z.number().int().nonnegative().nullable(),
+  tokens_per_sec: z.number().finite().nonnegative().nullable(),
+});
+
+const StudyPlan = z.object({
+  course_id: z.string().min(1),
+  detected_triggers: z.array(z.string()),
+  focus_topics: z.array(z.string().trim().min(1).max(500)).length(3),
+  recommended_blocks: z
+    .array(
+      z.object({
+        title: z.string().trim().min(1).max(500),
+        estimated_minutes: z.literal(25),
+      }),
+    )
+    .min(2)
+    .max(3),
+  inference_telemetry: Telemetry,
+  source: z.enum(["ai", "local"]),
+});
+
 export const api = {
   state: () => intercept(readState),
 
@@ -330,6 +366,38 @@ export const api = {
     z
       .object({ provider: z.string(), model: z.string() })
       .parse(await request("/api/engine")),
+
+  studyTriage: async (body: StudyTriageRequest): Promise<StudyTriagePlan> => {
+    const plan = StudyPlan.parse(
+      await request(
+        "/api/v1/triage/study",
+        {
+          method: "POST",
+          body: JSON.stringify(body),
+        },
+        90_000,
+      ),
+    );
+    if (plan.course_id !== body.course_id) {
+      throw new ApiError("Study triage returned a different course", "parse");
+    }
+    return plan;
+  },
+
+  insertStudy: async (courseId: string, blocks: StudyBlock[]) =>
+    normalizeState(
+      await request(
+        "/api/v1/triage/study/insert",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            course_id: courseId,
+            recommended_blocks: blocks,
+          }),
+        },
+        15_000,
+      ),
+    ),
 
   // The measured endpoint returns the same tree plus inference usage.
   triage: async (assignmentId: string) => {

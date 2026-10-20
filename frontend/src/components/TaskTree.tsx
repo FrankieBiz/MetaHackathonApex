@@ -6,8 +6,9 @@ import { useNow } from "@/hooks/useNow";
 import { API_BASE } from "@/lib/api";
 import { priorityScore, rollup } from "@/lib/engine";
 import { countdown, minutes, score } from "@/lib/format";
-import { isRemote, useTerminal } from "@/store/terminal";
-import type { Assignment, SubTaskNode } from "@/types";
+import { activeCourseOf, isRemote, useTerminal } from "@/store/terminal";
+import { studyOpportunity, studyTitleKey } from "@/lib/study";
+import type { Assignment, Course, SubTaskNode } from "@/types";
 
 const STATUS_LABEL: Record<
   Assignment["status"],
@@ -218,7 +219,118 @@ function TreeRows({
   });
 }
 
+function StudySprint({ course, now }: { course: Course; now: number }) {
+  const plan = useTerminal((s) => s.studyPlans[course.id]);
+  const running = useTerminal((s) => Boolean(s.studying[course.id]));
+  const inserting = useTerminal((s) => Boolean(s.insertingStudy[course.id]));
+  const error = useTerminal((s) => s.studyErrors[course.id]);
+  const data = useTerminal((s) => s.data);
+  const insert = useTerminal((s) => s.insertStudyBlocks);
+  const nodes =
+    data?.study_recommendations?.filter((n) => n.course_id === course.id) ?? [];
+  const titles = new Set(nodes.map((n) => studyTitleKey(n.title)));
+  const inserted = plan?.recommended_blocks.every((b) =>
+    titles.has(studyTitleKey(b.title)),
+  );
+  const opportunity = studyOpportunity(data?.assignments ?? [], course.id, now);
+  return (
+    <section
+      aria-label={`Study sprint for ${course.course_code}`}
+      aria-busy={running || inserting}
+      className="border-b border-line px-2.5 py-2 text-[12px]"
+    >
+      <div className="text-accent">
+        {course.course_code}
+        {" // STUDY SPRINT"}
+      </div>
+      {opportunity && <p className="mt-1 text-ink-2">{opportunity}</p>}
+      {running && (
+        <p role="status" className="mt-2 text-accent">
+          <Spinner /> Scanning syllabus and recent performance…
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="mt-2 text-down">
+          {error}
+        </p>
+      )}
+      {plan && !running && (
+        <div className="mt-2 space-y-2">
+          <div>
+            <div className="text-[10px] tracking-wider text-ink-3">
+              FLAGGED MATERIALS &amp; SIGNALS
+            </div>
+            <ul className="mt-1 space-y-1 break-words text-ink-2">
+              {plan.detected_triggers.map((trigger, i) => (
+                <li key={i}>◆ {trigger}</li>
+              ))}
+              {!plan.detected_triggers.length && (
+                <li>
+                  No exam or performance triggers found; general review sprint.
+                </li>
+              )}
+            </ul>
+          </div>
+          <div>
+            <div className="text-[10px] tracking-wider text-ink-3">
+              3 FOCUS TOPICS
+            </div>
+            <ol className="mt-1 list-inside list-decimal space-y-1 break-words text-ink-2">
+              {plan.focus_topics.map((topic, i) => (
+                <li key={i}>{topic}</li>
+              ))}
+            </ol>
+          </div>
+          <ul aria-label="Proposed study blocks" className="space-y-1 text-ink">
+            {plan.recommended_blocks.map((block, i) => (
+              <li key={i} className="flex gap-2">
+                <span className="shrink-0 text-accent">25m</span>
+                <span className="break-words">{block.title}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="flex flex-wrap items-center gap-2">
+            <Key
+              tone="accent"
+              disabled={inserting || inserted}
+              onClick={() => void insert(course.id)}
+            >
+              {inserting
+                ? "Saving study blocks…"
+                : inserted
+                  ? "Study blocks inserted"
+                  : `Insert ${plan.recommended_blocks.length} study blocks`}
+            </Key>
+            <span className="text-[11px] text-ink-3">
+              {plan.source === "local"
+                ? "Local starter · model unavailable"
+                : "Llama study plan"}
+            </span>
+          </div>
+        </div>
+      )}
+      {nodes.length > 0 && (
+        <ul
+          aria-label={`Saved study blocks for ${course.course_code}`}
+          className="mt-2 -mx-2.5"
+        >
+          <TreeRows
+            nodes={nodes}
+            assignmentId={`study:${course.id}`}
+            trail={[]}
+          />
+        </ul>
+      )}
+    </section>
+  );
+}
+
 export function TaskTree() {
+  const course = useTerminal(activeCourseOf);
+  const studyRunning = useTerminal((s) =>
+    course ? Boolean(s.studying[course.id]) : false,
+  );
+  const generateStudy = useTerminal((s) => s.generateStudyTriage);
   const assignment = useTerminal(
     (s) => s.data?.assignments.find((a) => a.id === s.selectedId) ?? null,
   );
@@ -228,10 +340,24 @@ export function TaskTree() {
   const remote = useTerminal((s) => isRemote(s.mode));
   const triage = useTerminal((s) => s.triage);
   const now = useNow(1000);
+  const studyAction = course ? (
+    <Key
+      tone="accent"
+      caps={false}
+      disabled={studyRunning}
+      onClick={() => void generateStudy(course.id)}
+    >
+      {studyRunning ? "Scanning…" : "⚡ Study Triage"}
+    </Key>
+  ) : null;
 
   if (!assignment) {
     return (
-      <Panel title="EXECUTION DECK // RECURSIVE WORK BREAKDOWN TREE">
+      <Panel
+        title="EXECUTION DECK // RECURSIVE WORK BREAKDOWN TREE"
+        actions={studyAction}
+      >
+        {course && <StudySprint course={course} now={now} />}
         <p className="px-3 py-6 text-ink-3">
           Select a row in the order book to load its work breakdown.
         </p>
@@ -247,8 +373,12 @@ export function TaskTree() {
   const progress = totals.total ? (totals.done / totals.total) * 100 : 0;
 
   return (
-    <Panel title="EXECUTION DECK // RECURSIVE WORK BREAKDOWN TREE">
+    <Panel
+      title="EXECUTION DECK // RECURSIVE WORK BREAKDOWN TREE"
+      actions={studyAction}
+    >
       <div className="flex min-h-full flex-col">
+        {course && <StudySprint course={course} now={now} />}
         <div className="flex flex-col gap-1 border-b border-line px-2.5 py-1.5">
           <div className="flex items-baseline justify-between gap-3">
             <div className="flex min-w-0 items-baseline gap-2">

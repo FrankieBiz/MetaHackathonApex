@@ -23,6 +23,7 @@ class StrictModel(BaseModel):
 class SubTaskNode(StrictModel):
     id: Identifier
     assignment_id: Identifier | None
+    course_id: Identifier | None = None
     parent_id: Identifier | None = None
     title: Title
     estimated_minutes: Annotated[int, Field(ge=1, le=100_000)]
@@ -45,6 +46,7 @@ class AssignmentModel(StrictModel):
     # Scored or excused by Canvas, so already settled in current_score. A submission
     # awaiting a grade is completed but not graded.
     graded: bool = False
+    score: Annotated[float, Field(ge=0)] | None = None
     priority_score: Annotated[float, Field(ge=0, le=100)] = 0.0
     subtasks: list[SubTaskNode] = Field(default_factory=list)
 
@@ -127,3 +129,49 @@ class DecomposeResponse(StrictModel):
     subtasks: list[SubTaskNode]
     telemetry: InferenceTelemetry
     source: Literal["ai", "local", "cached"]
+
+
+class RecentStudyAssignment(StrictModel):
+    title: Annotated[str, Field(min_length=1, max_length=500, pattern=r"\S")]
+    description: Annotated[str, Field(max_length=20_000)] = ""
+    score: Annotated[float, Field(ge=0)] | None = None
+    points_possible: Annotated[float, Field(ge=0)] = 0.0
+    weight: Annotated[float, Field(ge=0, le=100)] = 0.0
+    # HTTP JSON carries ISO strings; retain timezone validation without coercing other fields.
+    due_at: Annotated[AwareDatetime, Field(strict=False)] | None = None
+    status: Literal["pending", "in_progress", "completed"] = "pending"
+
+
+class StudyTriageRequest(StrictModel):
+    course_id: Identifier
+    course_name: Annotated[str, Field(min_length=1, max_length=500, pattern=r"\S")]
+    recent_assignments: Annotated[list[RecentStudyAssignment], Field(max_length=50)] = Field(
+        default_factory=list
+    )
+    syllabus_text: Annotated[str, Field(max_length=100_000)] = ""
+
+
+class StudyBlock(StrictModel):
+    title: Annotated[str, Field(min_length=1, max_length=500, pattern=r"\S")]
+    estimated_minutes: Literal[25] = 25
+
+
+StudyBlocks = Annotated[list[StudyBlock], Field(min_length=2, max_length=3)]
+FocusTopics = Annotated[
+    list[Annotated[str, Field(min_length=1, max_length=500, pattern=r"\S")]],
+    Field(min_length=3, max_length=3),
+]
+
+
+class StudyTriagePlan(StrictModel):
+    course_id: Identifier
+    detected_triggers: list[str]
+    focus_topics: FocusTopics
+    recommended_blocks: StudyBlocks
+    inference_telemetry: InferenceTelemetry
+    source: Literal["ai", "local"]
+
+
+class StudyInsertRequest(StrictModel):
+    course_id: Identifier
+    recommended_blocks: StudyBlocks

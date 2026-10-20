@@ -9,12 +9,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from openai import AsyncOpenAI
 
+from .ai_engine import generate_study_triage
 from .canvas_client import CanvasClient
 from .config import Settings, get_settings
 from .models import (
     DecomposeRequest,
     DecomposeResponse,
     InferenceTelemetry,
+    StudyInsertRequest,
+    StudyTriagePlan,
+    StudyTriageRequest,
     SubTaskNode,
     SubTaskUpdate,
     TerminalState,
@@ -73,7 +77,9 @@ def create_app(
 
     @app.exception_handler(KeyError)
     async def missing_resource(request: Request, exc: KeyError) -> JSONResponse:
-        return JSONResponse(status_code=404, content={"detail": "Assignment or subtask not found"})
+        return JSONResponse(
+            status_code=404, content={"detail": "Course, assignment or subtask not found"}
+        )
 
     @app.exception_handler(RequestValidationError)
     async def invalid_input(request: Request, exc: RequestValidationError) -> JSONResponse:
@@ -128,6 +134,16 @@ def create_app(
     @app.post("/api/sync", response_model=TerminalState)
     async def sync(request: Request) -> TerminalState:
         return await request.app.state.terminal.state(force=True)
+
+    @app.post("/api/v1/triage/study", response_model=StudyTriagePlan)
+    async def study_triage(body: StudyTriageRequest, request: Request) -> StudyTriagePlan:
+        return await generate_study_triage(
+            body, settings=config, client=request.app.state.terminal.llm
+        )
+
+    @app.post("/api/v1/triage/study/insert", response_model=TerminalState)
+    async def insert_study(body: StudyInsertRequest, request: Request) -> TerminalState:
+        return await request.app.state.terminal.insert_study(body)
 
     @app.post("/api/triage/{assignment_id}", response_model=list[SubTaskNode])
     async def triage(assignment_id: str, request: Request) -> list[SubTaskNode]:
