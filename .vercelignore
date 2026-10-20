@@ -8,3 +8,6 @@ tests
 .env
 .env.*
 *.tsbuildinfo
+.next
+.venv
+__pycache__

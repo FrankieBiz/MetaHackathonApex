@@ -159,8 +159,8 @@ The free plan sleeps after 15 idle minutes, and the next request takes about a m
 
 ### 2. Terminal on Vercel
 
-1. In Vercel, choose **Add New → Project**, import this repository, and set **Root Directory** to `frontend`. Do this even though a `vercel.json` sits at the repository root: that file deploys the legacy Vite app. [`frontend/vercel.json`](frontend/vercel.json) pins the Next.js framework preset, `npm ci`, `npm run build`, and security headers. Node comes from `engines` (24.x).
-2. Under **Environment Variables**, add `NEXT_PUBLIC_API_URL` = your Render URL for Production (and Preview if you want previews on the API). See [`frontend/.env.example`](frontend/.env.example).
+1. In Vercel, choose **Add New → Project** and import this repository, leaving **Root Directory** at the repository root. The root [`vercel.json`](vercel.json) declares `frontend/` as a Next.js [service](https://vercel.com/docs/services) (`npm ci`, `npm run build`), routes every path to it, and adds security headers. If the import screen shows a different **Framework Preset**, choose **Services**; Vercel's guide says a project builds as services only with that preset. Services are in Beta. Node comes from `engines` (24.x). A project whose **Root Directory** is already `frontend` keeps working through [`frontend/vercel.json`](frontend/vercel.json).
+2. Under **Environment Variables**, add `NEXT_PUBLIC_API_URL` = your Render URL for Production (and Preview if you want previews on the API). See [`frontend/.env.example`](frontend/.env.example). The same value is the target of the terminal's same-origin proxy: [`frontend/next.config.ts`](frontend/next.config.ts) forwards `/api/v1/*` to `<NEXT_PUBLIC_API_URL>/api/v1/*` (default `http://localhost:8000`).
 3. Deploy. `NEXT_PUBLIC_*` values are inlined at build time, so redeploy after changing one.
 4. If the production URL differs from what you entered for `CORS_ORIGINS`, update it on Render.
 
@@ -194,7 +194,8 @@ This runs `ruff check`, `ruff format --check`, and `pytest` for the backend, the
 backend/              FastAPI service: Canvas client, Llama planner, Supabase persistence (backend/README.md)
 frontend/             Next.js 16 terminal: React 19, Tailwind 4, react-grid-layout, Recharts, Zustand (frontend/README.md)
 render.yaml           Render Blueprint for the API
-frontend/vercel.json  Vercel project settings for the terminal (Root Directory: frontend)
+vercel.json           Vercel config: builds frontend/ as a Next.js service from the repository root
+frontend/vercel.json  Vercel settings for a project whose Root Directory is frontend
 start.sh, Makefile    One-command local stack and checks
 legacy_archive/       Original Vite + Express workspace that predates the terminal (docs/legacy-vite-app.md)
 ```

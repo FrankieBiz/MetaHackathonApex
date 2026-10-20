@@ -112,7 +112,7 @@ Sandbox snapshots and live snapshots use separate keys under `APEX_WORKSPACE_ID`
 
 ## Integration and deployment scope
 
-The existing React/Vite app uses its Express routes on port 3001. This backend is a separate service on port 8000; its endpoints are not yet wired into that UI or the Vercel Node deployment. A frontend can call it directly from the allowed origins `http://localhost:3000`, `http://127.0.0.1:3000`, `http://localhost:5173`, and `http://127.0.0.1:5173`, plus any listed in `CORS_ORIGINS`. The root `render.yaml` deploys this service to Render; see the root README. Keep the current Vite proxy when using the existing Express integrations.
+This backend is a separate service on port 8000. The Next.js terminal in `frontend/` calls it directly from the allowed origins `http://localhost:3000`, `http://127.0.0.1:3000`, `http://localhost:5173`, and `http://127.0.0.1:5173`, plus any listed in `CORS_ORIGINS`. It also proxies `/api/v1/*` on its own origin to this service, so those requests need no CORS. The root `render.yaml` deploys this service to Render; see the root README. The archived Vite app in `legacy_archive/` uses its own Express routes and does not call this backend.
 
 Run **one Uvicorn worker**: the cache, locks, and working state belong to one process. Supabase provides restart recovery, not coordination between workers. This is a single-user service without an authentication layer. For a hosted deployment, place it behind authenticated private access and HTTPS. Multi-user or multi-worker hosting needs identity-scoped storage and shared transactional state before scaling.
 

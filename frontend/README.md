@@ -28,7 +28,7 @@ The terminal works with or without the backend:
 
 On the simulation desk, every action (triage, checkboxes, time logging) runs locally and edits persist across reloads. The terminal probes for the backend every 30 seconds and switches over when it answers (unless pinned). **Sync now** retries immediately. **Reset simulation data** in the command palette restores the fixture dataset.
 
-Point at a different backend with `NEXT_PUBLIC_API_URL` (default `http://localhost:8000`). It is inlined at build time, so set it before `npm run build`. See `.env.example`; on Vercel, set it to the Render URL in the project's environment variables.
+Point at a different backend with `NEXT_PUBLIC_API_URL` (default `http://localhost:8000`). It is inlined at build time, so set it before `npm run build`. See `.env.example`; on Vercel, set it to the Render URL in the project's environment variables. The same value is the target of the `/api/v1/*` rewrite in `next.config.ts`, which proxies those paths on the terminal's own origin to the backend.
 
 ## Panels
 
