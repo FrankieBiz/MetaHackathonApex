@@ -1,0 +1,41 @@
+# Render Blueprint for the Apex OS FastAPI backend (Render → New → Blueprint → this repo).
+#
+# The service builds from the repository root, not backend/. backend/ is a Python package
+# with relative imports, so uvicorn loads it as backend.main:app ("main:app" run inside
+# backend/ fails with "attempted relative import"), and Render hides files outside a rootDir.
+# The build filter below still limits auto-deploys to backend changes.
+#
+# Python: pinned by .python-version (3.12, the tested runtime); new Render services default to 3.14.
+#
+# Optional variables, added later under Environment (secrets are not set from this file):
+#   CANVAS_API_URL, CANVAS_API_TOKEN   live Canvas data; the API has no auth, so leave the token
+#                                      unset on a public judging deployment (sandbox mode)
+#   LLM_BASE_URL, LLM_API_KEY, LLM_MODEL
+#                                      any OpenAI-compatible Llama endpoint; without one, triage
+#                                      serves a deterministic plan
+#   SUPABASE_URL, SUPABASE_KEY         service-role persistence; apply backend/sql/schema.sql first
+# Full reference: backend/README.md#configuration
+services:
+  - type: web
+    name: apex-os-api
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r backend/requirements.txt
+    # One worker on purpose: the Canvas cache, locks, and working state live in this process.
+    # Explicit because uvicorn otherwise reads WEB_CONCURRENCY, which Render sets per plan CPU.
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /openapi.json
+    autoDeployTrigger: commit
+    buildFilter:
+      paths:
+        - backend/**
+        - render.yaml
+        - .python-version
+      ignoredPaths:
+        - backend/tests/**
+    envVars:
+      # The Vercel origin(s) of the terminal, comma-separated, e.g. https://apex-os.vercel.app
+      # (no path). Localhost dev origins are always allowed.
+      - key: CORS_ORIGINS
+        sync: false
