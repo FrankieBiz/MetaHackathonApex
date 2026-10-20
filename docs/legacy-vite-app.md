@@ -1,6 +1,6 @@
 # Apex OS (legacy Vite workspace)
 
-> This documents the original Vite + Express app that still lives at the repository root (`src/`, `server/`, `api/`, root `vercel.json`). The current Apex OS terminal is `backend/` + `frontend/`; see the [root README](../README.md).
+> This documents the original Vite + Express app, archived as a self-contained project in [`legacy_archive/`](../legacy_archive) with its own `package.json`, lockfile, and `vercel.json`. Run every command below from `legacy_archive/`; paths in this document are relative to it. CI no longer builds or tests it. The current Apex OS terminal is `backend/` + `frontend/`; see the [root README](../README.md).
 
 A personal executive command center built with React 18, strict TypeScript, Vite, Tailwind CSS, Lucide, Framer Motion, react-grid-layout, and Zustand. Express provides same-origin integration routes locally and through Vercel Functions.
 
@@ -13,6 +13,7 @@ Your data stays in this browser. In **Settings → Workspace & backups**, export
 ## Run
 
 ```bash
+cd legacy_archive
 npm ci
 npm run dev
 ```
@@ -28,7 +29,7 @@ The production server serves the built application and API at **http://localhost
 
 ## Deploy to Vercel
 
-Import the repository into Vercel and select the repository root. The checked-in `vercel.json` supplies all build settings:
+Import the repository into Vercel and set **Root Directory** to `legacy_archive`. The repository root's `vercel.json` deploys the Next.js terminal instead. The archived `vercel.json` supplies all build settings:
 
 | Setting          | Value           |
 | ---------------- | --------------- |
@@ -111,4 +112,4 @@ npm run build
 npm run check
 ```
 
-The GitHub Actions workflow runs lint, tests, the production build, and a dependency audit for pushes and pull requests on Node 24. Tests cover parent/child progress, archiving and deletion, backup validation, storage recovery and write ordering, focus restoration, calendar recurrence, Canvas attachment normalization, local and AI task plans, integration URL boundaries, and HTTP behavior of the Vercel API handlers. Live Canvas and AI require your own credentials and are not contacted by the test suite.
+GitHub Actions no longer runs these checks; it covers `backend/` and `frontend/` only. Tests cover parent/child progress, archiving and deletion, backup validation, storage recovery and write ordering, focus restoration, calendar recurrence, Canvas attachment normalization, local and AI task plans, integration URL boundaries, and HTTP behavior of the Vercel API handlers. Live Canvas and AI require your own credentials and are not contacted by the test suite.

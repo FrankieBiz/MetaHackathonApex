@@ -196,5 +196,5 @@ frontend/             Next.js 16 terminal: React 19, Tailwind 4, react-grid-layo
 render.yaml           Render Blueprint for the API
 frontend/vercel.json  Vercel project settings for the terminal (Root Directory: frontend)
 start.sh, Makefile    One-command local stack and checks
-src/, server/, api/   Original Vite + Express workspace that predates the terminal (docs/legacy-vite-app.md)
+legacy_archive/       Original Vite + Express workspace that predates the terminal (docs/legacy-vite-app.md)
 ```
