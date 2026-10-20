@@ -15,7 +15,7 @@ import {
   volatilityRegime,
 } from "@/lib/engine";
 import { clock, pct, signed } from "@/lib/format";
-import { useTerminal } from "@/store/terminal";
+import { isRemote, useTerminal } from "@/store/terminal";
 import type { ConnectionMode, Course, DataOrigin } from "@/types";
 
 function Clock() {
@@ -42,12 +42,21 @@ const SIMULATION = "[MODE: ISOLATED SIMULATION DESK]";
 
 function EngineBadge() {
   const state = useInference();
+  const remote = useTerminal((s) => isRemote(s.mode));
+  // Probes on mount and again whenever the backend link drops or returns.
   useEffect(() => {
+    // The pinned simulation desk never contacts the backend.
+    if (useTerminal.getState().simulationPinned) return;
     let active = true;
     void api
       .engine()
       .then((configuration) => {
-        if (active) useInference.getState().configure(configuration);
+        if (!active) return;
+        const inference = useInference.getState();
+        inference.configure(configuration);
+        // Marked unavailable while the backend was unreachable; it answers again.
+        if (inference.status === "unavailable")
+          useInference.setState({ status: "ready" });
       })
       .catch(() => {
         if (active && useInference.getState().status === "ready")
@@ -56,7 +65,7 @@ function EngineBadge() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [remote]);
   const telemetry = state.telemetry;
   return (
     <div

@@ -32,7 +32,7 @@ function TriageLog({
     () => [
       `> TRIAGE ${assignment.course_code} "${assignment.title}"`,
       remote
-        ? `> POST ${API_BASE}/api/triage/${assignment.id}`
+        ? `> POST ${API_BASE}/api/decompose`
         : "> BACKEND OFFLINE · LOCAL PLANNER ENGAGED",
       `> CONTEXT ${assignment.points_possible} PTS · ${assignment.weight.toFixed(1)}% WT${
         assignment.due_at

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRestoreFocus } from "@/components/ui";
+import { useEscape, useRestoreFocus } from "@/components/ui";
 import { rankQueue } from "@/lib/engine";
 import { activeCourseOf, isRemote, useTerminal } from "@/store/terminal";
 
@@ -41,6 +41,7 @@ function PaletteDialog({
   const activeCourseId = useTerminal((s) => s.activeCourseId);
   const [query, setQuery] = useState("");
   useRestoreFocus();
+  useEscape(onClose);
   const [active, setActive] = useState(0);
   const [openedAt] = useState(() => Date.now());
   const list = useRef<HTMLUListElement>(null);
@@ -161,7 +162,6 @@ function PaletteDialog({
               setActive(0);
             }}
             onKeyDown={(event) => {
-              if (event.key === "Escape") onClose();
               if (event.key === "ArrowDown") {
                 event.preventDefault();
                 setActive(Math.min(results.length - 1, current + 1));

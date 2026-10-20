@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { Key, useRestoreFocus } from "@/components/ui";
+import { Key, useEscape, useRestoreFocus } from "@/components/ui";
 import { API_BASE } from "@/lib/api";
 import { isRemote, useTerminal } from "@/store/terminal";
 
@@ -25,6 +25,7 @@ function TokenDialog({ onClose }: { onClose: () => void }) {
   const [token, setToken] = useState(credentials?.token ?? "");
   const [error, setError] = useState<string | null>(null);
   useRestoreFocus();
+  useEscape(onClose);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -56,7 +57,6 @@ function TokenDialog({ onClose }: { onClose: () => void }) {
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 px-4 pt-[14vh]"
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
-      onKeyDown={(event) => event.key === "Escape" && onClose()}
     >
       <form
         role="dialog"

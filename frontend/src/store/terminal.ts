@@ -755,12 +755,16 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
       done();
       const totals = rollup(subtasks);
       const inference = useInference.getState().status;
+      // The backend never replaces a tree that already has checked tasks or logged time.
+      if (inference === "cached") {
+        log(
+          "info",
+          `Kept the saved plan for ${titleOf(get().data, assignmentId)}: work is already logged on it, so it was not replaced.`,
+        );
+        return;
+      }
       const planner =
-        local || inference === "local"
-          ? "starter plan"
-          : inference === "cached"
-            ? "saved plan"
-            : "Llama-3";
+        local || inference === "local" ? "starter plan" : "Llama-3";
       log(
         "ok",
         `Triage complete (${planner}): ${titleOf(get().data, assignmentId)} → ${totals.total} tasks, ${minutes(totals.estimated)} budget.`,

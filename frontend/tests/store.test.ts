@@ -66,6 +66,25 @@ function fakeBackend() {
         return reply({ detail: "Llama-3 unavailable" }, backend.triageStatus);
       }
       const assignmentId = JSON.parse(String(init.body)).assignment_id;
+      const existing = backend.state.assignments.find(
+        (a) => a.id === assignmentId,
+      )!.subtasks;
+      // Like the backend: a tree with recorded work comes back unchanged, never replaced.
+      if (
+        leaves(existing).some((n) => n.is_completed || n.actual_minutes > 0)
+      ) {
+        return reply({
+          subtasks: existing,
+          source: "cached",
+          telemetry: {
+            model_used: "cached-plan",
+            latency_ms: 0,
+            prompt_tokens: null,
+            completion_tokens: null,
+            tokens_per_sec: null,
+          },
+        });
+      }
       const tree: SubTaskNode[] = [
         {
           id: `${assignmentId}-remote-1`,
@@ -147,6 +166,18 @@ describe("terminal store against the backend", () => {
       .getState()
       .data!.assignments.find((a) => a.id === UNTRIAGED)!.subtasks;
     expect(subtasks.map((n) => n.id)).toEqual([`${UNTRIAGED}-remote-1`]);
+  });
+
+  it("says the saved plan was kept when the backend won't replace a tree with logged work", async () => {
+    const store = await loadStore();
+    await store.getState().boot();
+    const tree = () =>
+      store.getState().data!.assignments.find((a) => a.id === RAFT)!.subtasks;
+    const before = tree();
+    await store.getState().triage(RAFT);
+    expect(tree()).toEqual(before);
+    expect(store.getState().events[0]).toMatchObject({ level: "info" });
+    expect(store.getState().events[0].text).toMatch(/kept the saved plan/i);
   });
 
   it("moves course velocity before the backend answers, then persists through PATCH /api/v1", async () => {

@@ -86,10 +86,32 @@ export function Key({
 
 /** Returns focus to whatever opened the dialog once it closes. */
 export function useRestoreFocus() {
+  // Read on first render: by the time effects run, the dialog's autoFocus field has focus.
+  const [opener] = useState(() =>
+    typeof document === "undefined"
+      ? null
+      : (document.activeElement as HTMLElement | null),
+  );
+  useEffect(
+    () => () => {
+      // Only when focus fell to the page with the dialog, so it is never taken from
+      // whatever claimed it next (or from the dialog itself in a Strict Mode re-run).
+      if (!document.activeElement || document.activeElement === document.body)
+        opener?.focus();
+    },
+    [opener],
+  );
+}
+
+/** Escape closes the dialog wherever focus is, even after a click on its plain text. */
+export function useEscape(onClose: () => void) {
   useEffect(() => {
-    const opener = document.activeElement as HTMLElement | null;
-    return () => opener?.focus();
-  }, []);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 }
 
 const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];

@@ -136,6 +136,14 @@ export function Velocity() {
       : ahead
         ? STATUS_COLOR.up
         : STATUS_COLOR.down;
+  // Fits the longest course code: 11px mono measures ~7px a character, plus the tick gap.
+  const axisWidth = Math.min(
+    120,
+    Math.max(
+      68,
+      14 + 7 * Math.max(0, ...times.map((row) => row.course_code.length)),
+    ),
+  );
   const peak = Math.max(...load, 0);
   const peakDay = load.indexOf(peak);
   const done = cap.budgeted - cap.remaining;
@@ -281,7 +289,7 @@ export function Velocity() {
                   <YAxis
                     type="category"
                     dataKey="course_code"
-                    width={68}
+                    width={axisWidth}
                     tick={{
                       fill: "#a3acb6",
                       fontSize: 11,
