@@ -1,0 +1,228 @@
+@import "tailwindcss";
+
+@theme {
+  --font-mono:
+    "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+  --font-sans: var(--font-mono);
+
+  --color-canvas: #0a0a0a;
+  --color-panel: #111315;
+  --color-head: #16191d;
+  --color-line: #1e2328;
+  --color-line-strong: #2b3138;
+  --color-hover: #171b20;
+
+  --color-ink: #e6e8eb;
+  --color-ink-2: #a3acb6;
+  --color-ink-3: #7a848f;
+
+  --color-accent: #ff6b00;
+  --color-up: #00ff66;
+  --color-down: #ff3b30;
+  --color-bar-neutral: #4a535d;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    background: var(--color-canvas);
+  }
+
+  body {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--color-ink);
+    background: var(--color-canvas);
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-strong) transparent;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-accent) 35%, transparent);
+  }
+
+  :focus-visible {
+    outline: 1px solid var(--color-accent);
+    outline-offset: -1px;
+  }
+
+  button:not(:disabled),
+  [role="button"] {
+    cursor: pointer;
+  }
+}
+
+/* ------------------------------------------------------------ grid chrome */
+
+.react-grid-item.react-grid-placeholder {
+  background: var(--color-accent);
+  opacity: 0.08;
+  outline: 1px dashed var(--color-accent);
+  outline-offset: -1px;
+}
+
+.react-grid-item > .react-resizable-handle::after {
+  border-color: var(--color-ink-3);
+}
+
+.react-grid-item.react-draggable-dragging > section {
+  border-color: var(--color-accent);
+}
+
+/* ------------------------------------------------------------ ticker tape */
+
+@keyframes tape {
+  to {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+.tape {
+  animation: tape var(--tape-duration, 60s) linear infinite;
+}
+
+.tape-window:hover .tape,
+.tape-window:focus-within .tape {
+  animation-play-state: paused;
+}
+
+/* Remounted (via key) when a value changes; opacity only, so it stays on the compositor. */
+@keyframes tick-flash {
+  from {
+    opacity: 0.3;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.tick-flash {
+  position: relative;
+}
+
+.tick-flash::after {
+  content: "";
+  position: absolute;
+  inset: -1px -3px;
+  background: currentColor;
+  opacity: 0;
+  pointer-events: none;
+  animation: tick-flash 700ms ease-out;
+}
+
+/* ------------------------------------------------------- what-if slider */
+
+/*
+ * Inputs: --hold (the current grade, where a score leaves the projection
+ * unchanged), --lo and --hi (the span between it and the chosen score), all
+ * 0–1, and --fill (up or down). At rest the track is plain with a tick at
+ * --hold; dragging colors only the distance moved. Offsets follow the thumb's
+ * travel, which stops half a thumb short of each end.
+ */
+.whatif-range {
+  --thumb: 8px;
+  --at-lo: calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--lo));
+  --at-hi: calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--hi));
+  appearance: none;
+  height: 18px;
+  min-width: 0;
+  background: linear-gradient(var(--color-ink-3), var(--color-ink-3)) no-repeat;
+  background-size: 1px 10px;
+  background-position: calc(
+      var(--thumb) / 2 + (100% - var(--thumb)) * var(--hold)
+    )
+    center;
+}
+
+.whatif-range::-webkit-slider-runnable-track {
+  height: 2px;
+  background: linear-gradient(
+    to right,
+    var(--color-line-strong) var(--at-lo),
+    var(--fill) var(--at-lo) var(--at-hi),
+    var(--color-line-strong) var(--at-hi)
+  );
+}
+
+.whatif-range::-moz-range-track {
+  height: 2px;
+  background: linear-gradient(
+    to right,
+    var(--color-line-strong) var(--at-lo),
+    var(--fill) var(--at-lo) var(--at-hi),
+    var(--color-line-strong) var(--at-hi)
+  );
+}
+
+.whatif-range::-webkit-slider-thumb {
+  appearance: none;
+  width: var(--thumb);
+  height: 14px;
+  margin-top: -6px;
+  border: 0;
+  background: var(--color-ink);
+}
+
+.whatif-range::-moz-range-thumb {
+  width: var(--thumb);
+  height: 14px;
+  border: 0;
+  border-radius: 0;
+  background: var(--color-ink);
+}
+
+.whatif-range:hover::-webkit-slider-thumb,
+.whatif-range:focus-visible::-webkit-slider-thumb {
+  background: var(--color-accent);
+}
+
+.whatif-range:hover::-moz-range-thumb,
+.whatif-range:focus-visible::-moz-range-thumb {
+  background: var(--color-accent);
+}
+
+.whatif-range:focus-visible {
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------- triage log */
+
+@keyframes log-line {
+  from {
+    opacity: 0;
+  }
+}
+
+.log-line {
+  animation: log-line 160ms ease-out both;
+}
+
+@keyframes caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+.caret {
+  animation: caret 1s steps(1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tape,
+  .log-line,
+  .caret,
+  .tick-flash::after {
+    animation: none;
+  }
+
+  .react-grid-item,
+  .react-grid-layout {
+    transition: none;
+  }
+}

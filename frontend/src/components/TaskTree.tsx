@@ -1,0 +1,385 @@
+"use client";
+
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { Key, Meter, Panel, Spinner } from "@/components/ui";
+import { useNow } from "@/hooks/useNow";
+import { API_BASE } from "@/lib/api";
+import { priorityScore, rollup } from "@/lib/engine";
+import { countdown, minutes, score } from "@/lib/format";
+import { isRemote, useTerminal } from "@/store/terminal";
+import type { Assignment, SubTaskNode } from "@/types";
+
+const STATUS_LABEL: Record<
+  Assignment["status"],
+  { text: string; color: string }
+> = {
+  pending: { text: "PENDING", color: "text-ink-2" },
+  in_progress: { text: "IN PROGRESS", color: "text-accent" },
+  completed: { text: "COMPLETED", color: "text-up" },
+};
+
+function TriageLog({
+  assignment,
+  remote,
+  now,
+}: {
+  assignment: Assignment;
+  remote: boolean;
+  now: number;
+}) {
+  const lines = useMemo(
+    () => [
+      `> TRIAGE ${assignment.course_code} "${assignment.title}"`,
+      remote
+        ? `> POST ${API_BASE}/api/triage/${assignment.id}`
+        : "> BACKEND OFFLINE · LOCAL PLANNER ENGAGED",
+      `> CONTEXT ${assignment.points_possible} PTS · ${assignment.weight.toFixed(1)}% WT${
+        assignment.due_at
+          ? ` · DUE IN ${countdown(Date.parse(assignment.due_at) - now)}`
+          : ""
+      }`,
+      remote
+        ? "> AWAITING LLAMA-3 DECOMPOSITION"
+        : "> MATCHING PLAYBOOK TO DELIVERABLE TYPE",
+      "> SPLITTING INTO 15–45 MIN MICRO-TASKS",
+    ],
+    // `now` only seeds the countdown line; the script must not restart every tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [assignment.id, remote],
+  );
+  const [shown, setShown] = useState(1);
+  useEffect(() => {
+    if (shown >= lines.length) return;
+    const timer = setTimeout(() => setShown((n) => n + 1), 300);
+    return () => clearTimeout(timer);
+  }, [shown, lines.length]);
+
+  return (
+    <div className="px-3 py-3 text-[12px]" role="status" aria-live="polite">
+      {lines.slice(0, shown).map((line, index) => (
+        <div
+          key={index}
+          className={`log-line ${index === 0 ? "text-accent" : "text-ink-2"}`}
+        >
+          {line}
+        </div>
+      ))}
+      <div className="mt-1 text-accent">
+        <Spinner /> <span className="caret">█</span>
+      </div>
+    </div>
+  );
+}
+
+function Badge({ node }: { node: SubTaskNode }) {
+  const { actual, estimated } = rollup(node);
+  const leaf = !node.children.length;
+  const tone =
+    !leaf || actual === 0
+      ? "text-ink-3"
+      : actual > estimated
+        ? "text-down"
+        : "text-up";
+  return (
+    <span
+      className={`shrink-0 text-right text-[11px] whitespace-nowrap ${tone}`}
+      title={`${minutes(actual)} logged of ${minutes(estimated)} estimated`}
+    >
+      {minutes(actual)} / {minutes(estimated)}
+    </span>
+  );
+}
+
+function TreeRow({
+  node,
+  assignmentId,
+  trail,
+  last,
+}: {
+  node: SubTaskNode;
+  assignmentId: string;
+  trail: boolean[];
+  last: boolean;
+}) {
+  const toggle = useTerminal((s) => s.toggle);
+  const logTime = useTerminal((s) => s.logTime);
+  const leaf = !node.children.length;
+  const { done } = rollup(node);
+  const checked: boolean | "mixed" = node.is_completed
+    ? true
+    : done > 0
+      ? "mixed"
+      : false;
+  const prefix =
+    trail.map((ended) => (ended ? "    " : "│   ")).join("") +
+    (last ? "└── " : "├── ");
+
+  return (
+    <li className="flex h-[24px] items-center gap-1.5 pr-2.5 pl-2.5 hover:bg-hover">
+      <span aria-hidden className="shrink-0 whitespace-pre text-bar-neutral">
+        {prefix}
+      </span>
+      <span className="sr-only">Level {trail.length + 1}.</span>
+      <button
+        type="button"
+        role="checkbox"
+        aria-checked={checked}
+        aria-label={node.title}
+        onClick={() => toggle(assignmentId, node.id, !node.is_completed)}
+        className={`shrink-0 hover:text-accent ${
+          checked === true
+            ? "text-up"
+            : checked === "mixed"
+              ? "text-accent"
+              : "text-ink-2"
+        }`}
+      >
+        {checked === true ? "[x]" : checked === "mixed" ? "[-]" : "[ ]"}
+      </button>
+      <span
+        title={node.title}
+        className={`min-w-0 flex-1 truncate ${
+          node.is_completed
+            ? "text-ink-3"
+            : leaf
+              ? "text-ink"
+              : "font-semibold text-ink-2"
+        }`}
+      >
+        {node.title}
+      </span>
+      {node.is_study_recommendation && (
+        <span className="shrink-0 text-[10px] tracking-wider text-accent">
+          ◆ STUDY
+        </span>
+      )}
+      <Badge node={node} />
+      {leaf ? (
+        <span className="flex shrink-0 gap-0.5">
+          <Key
+            caps={false}
+            onClick={() => logTime(assignmentId, node.id, -15)}
+            disabled={node.actual_minutes === 0}
+            aria-label={`Remove 15 minutes from ${node.title}`}
+          >
+            -15m
+          </Key>
+          <Key
+            caps={false}
+            onClick={() => logTime(assignmentId, node.id, 15)}
+            aria-label={`Log 15 minutes on ${node.title}`}
+          >
+            +15m
+          </Key>
+        </span>
+      ) : (
+        // Keeps parent badges aligned with leaf badges.
+        <span aria-hidden className="invisible flex shrink-0 gap-0.5">
+          <Key tabIndex={-1} caps={false}>
+            -15m
+          </Key>
+          <Key tabIndex={-1} caps={false}>
+            +15m
+          </Key>
+        </span>
+      )}
+    </li>
+  );
+}
+
+function TreeRows({
+  nodes,
+  assignmentId,
+  trail,
+}: {
+  nodes: SubTaskNode[];
+  assignmentId: string;
+  trail: boolean[];
+}) {
+  return nodes.map((node, index) => {
+    const last = index === nodes.length - 1;
+    return (
+      <Fragment key={node.id}>
+        <TreeRow
+          node={node}
+          assignmentId={assignmentId}
+          trail={trail}
+          last={last}
+        />
+        {node.children.length > 0 && (
+          <TreeRows
+            nodes={node.children}
+            assignmentId={assignmentId}
+            trail={[...trail, last]}
+          />
+        )}
+      </Fragment>
+    );
+  });
+}
+
+export function TaskTree() {
+  const assignment = useTerminal(
+    (s) => s.data?.assignments.find((a) => a.id === s.selectedId) ?? null,
+  );
+  const triaging = useTerminal((s) =>
+    s.selectedId ? Boolean(s.triaging[s.selectedId]) : false,
+  );
+  const remote = useTerminal((s) => isRemote(s.mode));
+  const triage = useTerminal((s) => s.triage);
+  const now = useNow(1000);
+
+  if (!assignment) {
+    return (
+      <Panel title="EXECUTION DECK // RECURSIVE WORK BREAKDOWN TREE">
+        <p className="px-3 py-6 text-ink-3">
+          Select a row in the order book to load its work breakdown.
+        </p>
+      </Panel>
+    );
+  }
+
+  const totals = rollup(assignment.subtasks);
+  const status = STATUS_LABEL[assignment.status];
+  const hours = assignment.due_at
+    ? (Date.parse(assignment.due_at) - now) / 3_600_000
+    : null;
+  const progress = totals.total ? (totals.done / totals.total) * 100 : 0;
+
+  return (
+    <Panel title="EXECUTION DECK // RECURSIVE WORK BREAKDOWN TREE">
+      <div className="flex min-h-full flex-col">
+        <div className="flex flex-col gap-1 border-b border-line px-2.5 py-1.5">
+          <div className="flex items-baseline justify-between gap-3">
+            <div className="flex min-w-0 items-baseline gap-2">
+              <span className="shrink-0 text-[12px] font-semibold whitespace-nowrap text-accent">
+                {assignment.course_code}
+              </span>
+              <span
+                className="truncate text-[12px] text-ink"
+                title={assignment.title}
+              >
+                {assignment.title}
+              </span>
+            </div>
+            <span
+              className={`shrink-0 text-[12px] ${
+                assignment.status === "completed"
+                  ? "text-ink-3"
+                  : hours !== null && hours < 0
+                    ? "text-down"
+                    : hours !== null && hours < 24
+                      ? "text-accent"
+                      : "text-ink-2"
+              }`}
+            >
+              {assignment.due_at
+                ? `DUE ${countdown(Date.parse(assignment.due_at) - now)}`
+                : "NO DUE DATE"}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-x-3 text-[10px] tracking-wider text-ink-3 uppercase">
+            <span className={status.color}>{status.text}</span>
+            <span>
+              {assignment.points_possible} pts · {assignment.weight.toFixed(1)}%
+              wt
+            </span>
+            <span>Priority {score(priorityScore(assignment, now))}</span>
+            {totals.total > 0 && (
+              <span>
+                {totals.done}/{totals.total} tasks · est{" "}
+                {minutes(totals.estimated)} · act{" "}
+                <span
+                  className={
+                    totals.actual > totals.estimated
+                      ? "text-down"
+                      : "text-ink-2"
+                  }
+                >
+                  {minutes(totals.actual)}
+                </span>
+              </span>
+            )}
+          </div>
+          {totals.total > 0 && (
+            <Meter
+              label="Task completion"
+              value={progress}
+              max={100}
+              color={
+                assignment.status === "completed"
+                  ? "var(--color-up)"
+                  : "var(--color-accent)"
+              }
+            />
+          )}
+        </div>
+
+        {assignment.status === "completed" && totals.total > 0 && (
+          <div className="border-b border-line bg-up/10 px-2.5 py-1 text-[11px] text-up">
+            ✓ FILLED: every top-level task is done, so the assignment is marked
+            completed.
+          </div>
+        )}
+
+        {triaging ? (
+          <TriageLog assignment={assignment} remote={remote} now={now} />
+        ) : assignment.subtasks.length ? (
+          <ul
+            aria-label={`Work breakdown for ${assignment.title}`}
+            className="py-1 text-[12px]"
+          >
+            <li className="flex h-[24px] items-center gap-1.5 px-2.5 text-ink-2">
+              <span aria-hidden className="text-accent">
+                ■
+              </span>
+              {assignment.course_code} WORK BREAKDOWN
+            </li>
+            <TreeRows
+              nodes={assignment.subtasks}
+              assignmentId={assignment.id}
+              trail={[]}
+            />
+          </ul>
+        ) : (
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-8 text-center">
+            <div className="text-[11px] tracking-wider text-ink-3 uppercase">
+              No work breakdown yet
+            </div>
+            <p className="max-w-[46ch] text-ink-2">
+              Llama-3 splits this assignment into 15–45 minute tasks you can
+              check off and time.
+            </p>
+            <Key
+              tone="accent"
+              size="lg"
+              onClick={() => void triage(assignment.id)}
+            >
+              DECONSTRUCT WITH LLAMA-3
+            </Key>
+            {!remote && (
+              <p className="text-[11px] text-ink-3">
+                Backend offline: the local planner builds the tree instead.
+              </p>
+            )}
+          </div>
+        )}
+
+        {assignment.subtasks.length > 0 && !triaging && (
+          <footer className="sticky bottom-0 mt-auto flex flex-wrap gap-x-4 border-t border-line bg-panel px-2.5 py-1 text-[10px] tracking-wider text-ink-3 uppercase">
+            <span>
+              <span className="text-up">[x]</span> done
+            </span>
+            <span>
+              <span className="text-accent">[-]</span> partial
+            </span>
+            <span>[ ] open</span>
+            <span className="hidden @lg:inline">
+              Checking a parent checks every task under it
+            </span>
+          </footer>
+        )}
+      </div>
+    </Panel>
+  );
+}
