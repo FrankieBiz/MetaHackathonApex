@@ -7,7 +7,8 @@ coverage/
 .qa/
 
 .vercel
-.agents/
+.agents/*
+!.agents/skills/
 
 # Python backend
 .venv/
