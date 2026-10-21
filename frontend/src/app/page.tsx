@@ -9,6 +9,7 @@ import {
 } from "react-grid-layout";
 import { CommandPalette } from "@/components/CommandPalette";
 import { EquityCurve } from "@/components/EquityCurve";
+import { NextBestAction } from "@/components/NextBestAction";
 import { OrderBook } from "@/components/OrderBook";
 import { TaskTree } from "@/components/TaskTree";
 import { TokenModal } from "@/components/TokenModal";
@@ -311,6 +312,7 @@ function Workstation() {
           <Key onClick={resetLayout}>RESET LAYOUT</Key>
         </span>
       </div>
+      <NextBestAction />
       <main
         ref={containerRef}
         className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto"

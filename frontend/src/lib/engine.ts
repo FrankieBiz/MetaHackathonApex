@@ -487,6 +487,66 @@ export function floorText(
   return `score ≥ ${floor.toFixed(1)}% holds the ${target} (margin ${margin})`;
 }
 
+// -------------------------------------------------------- next best action
+
+/** No work breakdown yet: triage still has a plan to produce. */
+export const isUntriaged = (a: Assignment) => a.subtasks.length === 0;
+
+export interface NextAction {
+  assignment: Assignment;
+  course: Course | null;
+  /** First open atomic task in plan order; null when the deliverable still needs triage. */
+  leaf: SubTaskNode | null;
+  /** Estimated minutes for the leaf; null until triage sizes the work. */
+  duration: number | null;
+  /** Final-grade points the step locks in: weight × the leaf's share of the plan's estimate. */
+  protectedPoints: number;
+  floor: number | null;
+  hours: number | null;
+}
+
+/**
+ * The single step to take tonight: the next open task on the top of the
+ * priority queue. Deliverables whose every task is checked are skipped; an
+ * untriaged one returns its whole weight with no leaf, so the step is triage.
+ */
+export function nextBestAction(
+  state: Pick<TerminalState, "courses" | "assignments">,
+  now: number,
+): NextAction | null {
+  for (const { assignment, hours } of rankQueue(state.assignments, now)) {
+    const course =
+      state.courses.find((c) => c.id === assignment.course_id) ?? null;
+    const { floor } = gradeRisk(assignment, course);
+    if (isUntriaged(assignment)) {
+      return {
+        assignment,
+        course,
+        leaf: null,
+        duration: null,
+        protectedPoints: assignment.weight,
+        floor,
+        hours,
+      };
+    }
+    const leaf = leaves(assignment.subtasks).find((node) => !node.is_completed);
+    if (!leaf) continue;
+    const total = rollup(assignment.subtasks).estimated;
+    return {
+      assignment,
+      course,
+      leaf,
+      duration: leaf.estimated_minutes,
+      protectedPoints: total
+        ? (assignment.weight * leaf.estimated_minutes) / total
+        : 0,
+      floor,
+      hours,
+    };
+  }
+  return null;
+}
+
 export interface TriageContext {
   now: number;
   course: Course | null;

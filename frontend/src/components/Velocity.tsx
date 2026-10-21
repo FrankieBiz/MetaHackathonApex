@@ -27,6 +27,7 @@ import {
   type VelocityTier,
 } from "@/lib/engine";
 import { minutes, pct } from "@/lib/format";
+import { GLOSSARY } from "@/lib/glossary";
 import { useTerminal } from "@/store/terminal";
 import type { Assignment, Course } from "@/types";
 
@@ -50,9 +51,17 @@ const VELOCITY: Record<VelocityTier, { label: string; color: string }> = {
   overrun: { label: "▼ OVERRUN", color: STATUS_COLOR.down },
 };
 
-function Stat({ label, children }: { label: string; children: ReactNode }) {
+function Stat({
+  label,
+  help,
+  children,
+}: {
+  label: string;
+  help?: string;
+  children: ReactNode;
+}) {
   return (
-    <div className="flex min-w-0 flex-col gap-1 bg-panel px-2.5 py-2">
+    <div className="flex min-w-0 flex-col gap-1 bg-panel px-2.5 py-2" title={help}>
       <div className="text-[10px] tracking-wider text-ink-3 uppercase">
         {label}
       </div>
@@ -184,7 +193,7 @@ export function Velocity() {
             </div>
           </Stat>
 
-          <Stat label="Assignment volatility">
+          <Stat label="Assignment volatility" help={GLOSSARY.volatility}>
             <div className="flex items-baseline gap-2">
               <span className="text-[24px] leading-none font-semibold whitespace-nowrap text-ink">
                 {volatility.toFixed(0)}

@@ -1,10 +1,11 @@
 // Automated ~10 second demo for judges. It walks the trading-desk loop:
-// rank the queue, run triage, fill an atomic task, then simulate a grade.
+// pick an untriaged deliverable, run live triage on it, fill one of the
+// freshly planned atomic tasks, then simulate a grade.
 // Any key press, pointer press, or stopTour() aborts it and hands control
 // back to the user.
 
 import { useTerminal } from "@/store/terminal";
-import { leaves, rankQueue } from "@/lib/engine";
+import { isUntriaged, leaves, rankQueue } from "@/lib/engine";
 import { playFill } from "@/lib/feedback";
 
 /**
@@ -14,6 +15,8 @@ import { playFill } from "@/lib/feedback";
 export const WHAT_IF_EVENT = "apex:what-if";
 
 const DEMO_SCORE = 95;
+/** Longest the tour waits on a triage before moving on; a live model call can run long. */
+const TRIAGE_WAIT_MS = 9000;
 
 let running = false;
 let runToken = 0;
@@ -73,8 +76,10 @@ function teardown() {
 
 export function stopTour(): void {
   if (!running) return;
+  // teardown() clears cancelPause, so grab it first to release a pending pause.
+  const cancel = cancelPause;
   teardown();
-  cancelPause?.();
+  cancel?.();
   log("SYS // DEMO TOUR: Aborted. Terminal is fully interactive.");
 }
 
@@ -93,26 +98,37 @@ export async function startTour(): Promise<void> {
 
   try {
     const store = useTerminal.getState();
-    const top = store.data
-      ? rankQueue(store.data.assignments, Date.now())[0]?.assignment
-      : undefined;
+    const queue = store.data
+      ? rankQueue(store.data.assignments, Date.now()).map((e) => e.assignment)
+      : [];
+    // Triage on a plan with logged work keeps the saved plan (CACHED-PLAN), so
+    // the tour prefers the highest-priority deliverable that has no plan yet.
+    const untriaged = queue.find(isUntriaged);
+    const top = untriaged ?? queue[0];
     if (!top) {
       log("SYS // DEMO TOUR: No active deliverable to demonstrate.");
       return;
     }
 
-    // Step 1: select the highest-priority deliverable.
+    // Step 1: select the deliverable to triage.
     store.select(top.id);
     log(
-      "SYS // DEMO TOUR: Selecting highest priority deliverable on the order book...",
+      untriaged
+        ? `SYS // DEMO TOUR: Selecting untriaged deliverable ${top.course_code} "${top.title}"...`
+        : "SYS // DEMO TOUR: Every deliverable is planned; selecting the top of the order book...",
     );
     await pause(1200);
     if (!live()) return;
 
-    // Step 2: run triage; its 4-stage Meta Llama trace streams into the inspector.
+    // Step 2: run triage; its 4-stage Meta Llama trace streams into the
+    // inspector and the new work breakdown lands in the execution deck.
     log("SYS // DEMO TOUR: Running Meta Llama 4-stage agentic triage...");
-    void useTerminal.getState().triage(top.id);
-    await pause(2200);
+    const triaged = useTerminal.getState().triage(top.id);
+    await Promise.race([triaged, pause(TRIAGE_WAIT_MS)]);
+    // Clears the wait timer when triage finished first.
+    cancelPause?.();
+    if (!live()) return;
+    await pause(600);
     if (!live()) return;
 
     // Step 3: check off the first open atomic task.

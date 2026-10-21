@@ -8,9 +8,11 @@ import {
   findNode,
   floorText,
   gradeRisk,
+  isUntriaged,
   leaves,
   localTriage,
   logMinutes,
+  nextBestAction,
   portfolio,
   priorityScore,
   forecastGrade,
@@ -774,5 +776,74 @@ describe("agent reasoning trace", () => {
     expect(reasoningTrace(project, fresh, plan, planner)[3].evidence[0]).toBe(
       "VELOCITY no completed tasks yet · estimates taken at face value",
     );
+  });
+});
+
+describe("next best action", () => {
+  const base = createMockState(NOW);
+  const assignment = (
+    id: string,
+    hours: number,
+    subtasks: SubTaskNode[],
+    extra: Partial<Assignment> = {},
+  ): Assignment => ({
+    ...base.assignments[0],
+    id,
+    due_at: at(hours),
+    weight: 20,
+    points_possible: 100,
+    status: "pending",
+    subtasks,
+    ...extra,
+  });
+
+  it("returns the first open task on the top of the queue", () => {
+    const plan = [
+      node("done", [], { is_completed: true, estimated_minutes: 20 }),
+      node("next", [], { estimated_minutes: 30 }),
+      node("later", [], { estimated_minutes: 50 }),
+    ];
+    const action = nextBestAction(
+      {
+        courses: base.courses,
+        assignments: [assignment("soon", 10, plan), assignment("far", 90, [])],
+      },
+      NOW,
+    )!;
+    expect(action.assignment.id).toBe("soon");
+    expect(action.leaf?.id).toBe("next");
+    expect(action.duration).toBe(30);
+    // 20% weight × 30 of 100 estimated minutes.
+    expect(action.protectedPoints).toBeCloseTo(6);
+    expect(action.hours).toBeCloseTo(10);
+  });
+
+  it("skips fully checked plans and asks for triage on unplanned work", () => {
+    const checked = [node("x", [], { is_completed: true })];
+    const action = nextBestAction(
+      {
+        courses: base.courses,
+        assignments: [
+          assignment("checked", 5, checked, { status: "in_progress" }),
+          assignment("fresh", 40, [], { weight: 15 }),
+        ],
+      },
+      NOW,
+    )!;
+    expect(action.assignment.id).toBe("fresh");
+    expect(isUntriaged(action.assignment)).toBe(true);
+    expect(action.leaf).toBeNull();
+    expect(action.duration).toBeNull();
+    expect(action.protectedPoints).toBe(15);
+  });
+
+  it("is null when nothing is open", () => {
+    expect(
+      nextBestAction({ courses: base.courses, assignments: [] }, NOW),
+    ).toBeNull();
+  });
+
+  it("finds an untriaged deliverable in the mock desk for the tour", () => {
+    expect(base.assignments.some(isUntriaged)).toBe(true);
   });
 });

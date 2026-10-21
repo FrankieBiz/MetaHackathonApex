@@ -22,6 +22,7 @@ import {
   type VelocityTier,
 } from "@/lib/engine";
 import { clock, pct, signed } from "@/lib/format";
+import { GLOSSARY } from "@/lib/glossary";
 import { isRemote, useTerminal } from "@/store/terminal";
 import { startTour } from "@/lib/tour";
 import { armStartupChime, playAlert } from "@/lib/feedback";
@@ -200,7 +201,10 @@ function MarginTag({ margin }: { margin: number | null }) {
     return <span className="text-ink-3">[NO GRADE YET]</span>;
   const up = margin >= 0;
   return (
-    <span className={up ? "text-up" : "text-down"}>
+    <span
+      className={up ? "text-up" : "text-down"}
+      title={GLOSSARY.marginOfSafety}
+    >
       {up ? "▲" : "▼"} [{signed(margin)}% MARGIN]
     </span>
   );
@@ -352,7 +356,10 @@ function Tape() {
             {velocity === null ? "NO FILLS" : pct(velocity)}
           </span>
         </span>
-        <span className="flex items-center gap-2 px-5">
+        <span
+          className="flex items-center gap-2 px-5"
+          title={GLOSSARY.volatility}
+        >
           <span className="text-accent">VOLATILITY</span>
           <span className="text-ink">{volatility.toFixed(0)}</span>
           <span className="text-ink-3">
