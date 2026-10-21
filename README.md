@@ -37,11 +37,12 @@ The desk also takes over automatically. If the API is slower than 2.5 s, returns
 
 ### What to try
 
-1. **Order book** (top left). Open work is ranked by Priority Execution Score with live countdowns. Use `↑` `↓` to move the selection.
-2. **Execute AI triage** on an untriaged assignment; three ship without a plan. The backend asks Llama for a task tree. Without a model, it returns a deterministic plan.
-3. **Execution deck**. Checking a parent completes all its children, and completing every child checks the parent. Leaf tasks log time in 15-minute steps. Finishing a timed task, or logging more time on one, moves that course's **velocity** on the ticker tape before the save returns.
-4. **Equity curve**. Drag a what-if score slider. The dashed projected trajectory redraws, and the **margin of safety** badge flips between `+4.2% BUFFER ABOVE 90.0% TARGET` and `−1.8% MARGIN DEFICIT [ WARNING ]`.
-5. **`Ctrl+K`** opens the command palette: jump to any assignment, sync, reset the layout, or reset the simulation data. Drag panel headers to rearrange the grid.
+1. **Judge Demo Tour**: Click **`▶ TOUR`** in the top bar, open with **`?tour=1`**, or select **`RUN JUDGE DEMO TOUR`** in `Ctrl+K`. In 10 seconds, it walks through priority selection, 4-stage Meta Llama triage streaming, task fill with audio feedback, and what-if sensitivity modeling.
+2. **Order book** (top left). Open work is ranked by Priority Execution Score with live countdowns. Navigate using **`J`** / **`K`** or `↑` / `↓`, and jump to the top with **`G`**. The inspector displays **Grade $\Delta$** ($\partial\text{Grade}/\partial\text{Score}$), points, rubric weights, and grade floor.
+3. **Execute AI triage**. Press **`T`** or click triage on an untriaged assignment. The backend streams a 4-stage grounded reasoning trace (`INGEST & AUDIT`, `CAPACITY CHECK`, `CRITICAL PATH`, `VERIFICATION`) and decomposes work into atomic 15–45 min tasks.
+4. **Execution deck & audio feedback**. Press **`M`** or click **`SND ON`** to enable synthesized Web Audio feedback. Completing an atomic task sounds a crisp micro-click, and filling a deliverable triggers a harmonic chord fill and haptic vibration. Leaf tasks log time in 15-minute steps, immediately updating course **velocity** on the ticker tape.
+5. **Equity curve & What-If simulator**. Drag a what-if score slider or trigger a what-if scenario. The dashed projected trajectory redraws, and the **margin of safety** badge updates between `BUFFER ABOVE TARGET` and `MARGIN DEFICIT [ WARNING ]`.
+6. **`Ctrl+K` / `?` command palette**. Fuzzy subsequence search across actions, assignments, and study sessions with shortcut badges. Drag panel headers to rearrange the Bloomberg workstation grid.
 
 ## Architecture
 

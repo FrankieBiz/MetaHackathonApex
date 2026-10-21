@@ -354,6 +354,11 @@ function Inspector() {
               <Fact label="Points" value={String(assignment.points_possible)} />
               <Fact label="Weight" value={`${assignment.weight.toFixed(1)}%`} />
               <Fact
+                label="Grade Δ"
+                value={`±${(assignment.weight / 100).toFixed(2)}`}
+                title="Grade Sensitivity Delta: points final grade moves per 1% change in deliverable score"
+              />
+              <Fact
                 label="Grade / pt"
                 value={
                   assignment.points_possible

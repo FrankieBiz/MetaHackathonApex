@@ -23,6 +23,7 @@ import {
 } from "@/lib/engine";
 import { clock, pct, signed } from "@/lib/format";
 import { isRemote, useTerminal } from "@/store/terminal";
+import { startTour } from "@/lib/tour";
 import type { ConnectionMode, Course, DataOrigin } from "@/types";
 
 function Clock() {
@@ -359,6 +360,8 @@ export function TopBar() {
   const syncing = useTerminal((s) => s.syncing);
   const armed = useTerminal((s) => s.credentials !== null);
   const sync = useTerminal((s) => s.sync);
+  const soundOn = useTerminal((s) => s.soundOn);
+  const toggleSound = useTerminal((s) => s.toggleSound);
   const setTokenOpen = useTerminal((s) => s.setTokenOpen);
   const setPaletteOpen = useTerminal((s) => s.setPaletteOpen);
   const modifier = useModifierLabel();
@@ -378,6 +381,20 @@ export function TopBar() {
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
           <ConnectionBadge />
           <EngineBadge />
+          <Key
+            onClick={() => void startTour()}
+            title="Start automated judge demonstration tour"
+            aria-label="Start demo tour"
+          >
+            ▶ TOUR
+          </Key>
+          <Key
+            onClick={() => toggleSound()}
+            title={`Toggle terminal audio effects (${soundOn ? "ON" : "OFF"}, hotkey M)`}
+            aria-label="Toggle audio effects"
+          >
+            SND {soundOn ? "ON" : "OFF"}
+          </Key>
           <Key
             tone="accent"
             onClick={() => void sync()}

@@ -20,7 +20,6 @@ import {
   simulatable,
   studyRecommendation,
   type Projection,
-  type Scenario,
 } from "@/lib/engine";
 import { minutes, pct, shortDate, signed } from "@/lib/format";
 import { useTerminal } from "@/store/terminal";
@@ -257,7 +256,8 @@ export function EquityCurve() {
       s.activeCourseId,
   );
   const [view, setView] = useState<"graph" | "table">("graph");
-  const [scenario, setScenario] = useState<Scenario>({});
+  const scenario = useTerminal((s) => s.scenario);
+  const setScenarioScore = useTerminal((s) => s.setScenarioScore);
   // A tile can focus another course until the execution deck's selection changes.
   const [picked, setPicked] = useState<string | null>(null);
   const selection = selectedId ?? selectedCourse;
@@ -279,17 +279,16 @@ export function EquityCurve() {
   }, []);
 
   const setScore = useCallback(
-    (id: string, score: number) => setScenario((s) => ({ ...s, [id]: score })),
-    [],
+    (id: string, score: number) => setScenarioScore(id, score),
+    [setScenarioScore],
   );
   const resetScores = useCallback(
-    (ids: string[]) =>
-      setScenario((s) =>
-        Object.fromEntries(
-          Object.entries(s).filter(([id]) => !ids.includes(id)),
-        ),
-      ),
-    [],
+    (ids: string[]) => {
+      for (const id of ids) {
+        setScenarioScore(id, undefined);
+      }
+    },
+    [setScenarioScore],
   );
 
   const projections = useMemo(

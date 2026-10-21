@@ -32,7 +32,15 @@ import {
   setCompletion,
   triageContext,
   updateSubtasks,
+  type Scenario,
 } from "@/lib/engine";
+import {
+  playFill,
+  playTick,
+  soundEnabled,
+  toggleSound as toggleFeedbackSound,
+  triggerHaptic,
+} from "@/lib/feedback";
 import { minutes } from "@/lib/format";
 import { createMockState } from "@/lib/mockData";
 import { reanchor } from "@/lib/sandbox";
@@ -95,6 +103,11 @@ interface TerminalStore {
   queuedEdits: number;
   paletteOpen: boolean;
   tokenOpen: boolean;
+  soundOn: boolean;
+  toggleSound: () => void;
+  scenario: Scenario;
+  setScenarioScore: (assignmentId: string, score: number | undefined) => void;
+  resetScenario: (courseId?: string) => void;
 
   boot: () => Promise<void>;
   refresh: () => Promise<boolean>;
@@ -438,6 +451,37 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
     queuedEdits: 0,
     paletteOpen: false,
     tokenOpen: false,
+    soundOn: soundEnabled(),
+    scenario: {},
+
+    toggleSound: () => {
+      const next = toggleFeedbackSound();
+      set({ soundOn: next });
+    },
+
+    setScenarioScore: (assignmentId, score) =>
+      set((s) => {
+        if (score === undefined) {
+          const rest = { ...s.scenario };
+          delete rest[assignmentId];
+          return { scenario: rest };
+        }
+        return { scenario: { ...s.scenario, [assignmentId]: score } };
+      }),
+
+    resetScenario: (courseId) =>
+      set((s) => {
+        if (!courseId || !s.data) return { scenario: {} };
+        const ids = new Set(
+          s.data.assignments
+            .filter((a) => a.course_id === courseId)
+            .map((a) => a.id),
+        );
+        const kept = Object.fromEntries(
+          Object.entries(s.scenario).filter(([id]) => !ids.has(id)),
+        );
+        return { scenario: kept };
+      }),
 
     boot: async () => {
       // Hold the boot screen until the feed answers (a refused connection
@@ -866,7 +910,12 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
       commit(next);
       const after = next.assignments.find((a) => a.id === assignmentId)?.status;
       if (before !== "completed" && after === "completed") {
+        playFill();
+        triggerHaptic(18);
         log("ok", `Filled: ${titleOf(next, assignmentId)} marked completed.`);
+      } else {
+        playTick();
+        triggerHaptic(10);
       }
       push("checkbox update", subtaskId, { is_completed: value });
     },

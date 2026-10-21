@@ -27,6 +27,8 @@ import {
 } from "@/lib/layout";
 import { isRemote, useTerminal } from "@/store/terminal";
 import { Velocity } from "@/components/Velocity";
+import { rankQueue } from "@/lib/engine";
+import { startTour } from "@/lib/tour";
 import type { TerminalEvent } from "@/types";
 
 const MARGIN = 6;
@@ -59,6 +61,16 @@ function useBackendLoop() {
 
 function useHotkeys() {
   useEffect(() => {
+    // If URL has ?tour=1, auto-trigger the guided judge demonstration tour after boot
+    if (typeof window !== "undefined" && /[?&]tour=1\b/.test(window.location.search)) {
+      const timer = setTimeout(() => {
+        void startTour();
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+  useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       // Ctrl+Shift+D (Ctrl on every platform): live Canvas <-> simulation desk.
       if (
@@ -78,6 +90,67 @@ function useHotkeys() {
           useTerminal.getState();
         setTokenOpen(false);
         setPaletteOpen(!paletteOpen);
+        return;
+      }
+
+      // Ignore single-key shortcuts while typing in inputs or when dialogs are open
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      const state = useTerminal.getState();
+      if (state.paletteOpen || state.tokenOpen) return;
+
+      const key = event.key.toLowerCase();
+
+      // Sound toggle (M)
+      if (key === "m" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        state.toggleSound();
+        return;
+      }
+
+      // Triage selected assignment (T)
+      if (key === "t" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        if (state.selectedId) {
+          event.preventDefault();
+          void state.triage(state.selectedId);
+        }
+        return;
+      }
+
+      // Keyboard cheat-sheet / command palette (?)
+      if (event.key === "?" && !event.ctrlKey && !event.metaKey) {
+        event.preventDefault();
+        state.setPaletteOpen(true);
+        return;
+      }
+
+      // Order book navigation (J / K / G)
+      if (state.data && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        const queue = rankQueue(state.data.assignments, Date.now()).map(
+          (e) => e.assignment.id,
+        );
+        if (!queue.length) return;
+        const currentIdx = state.selectedId ? queue.indexOf(state.selectedId) : -1;
+
+        if (key === "j") {
+          event.preventDefault();
+          const nextId = queue[Math.min(queue.length - 1, currentIdx + 1)] ?? queue[0];
+          if (nextId) state.select(nextId);
+        } else if (key === "k") {
+          event.preventDefault();
+          const prevId = queue[Math.max(0, currentIdx - 1)] ?? queue[0];
+          if (prevId) state.select(prevId);
+        } else if (key === "g") {
+          event.preventDefault();
+          if (queue[0]) state.select(queue[0]);
+        }
       }
     };
     window.addEventListener("keydown", onKey);

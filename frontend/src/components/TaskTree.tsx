@@ -420,9 +420,11 @@ function StudySprint({ course, now }: { course: Course; now: number }) {
   const nodes =
     data?.study_recommendations?.filter((n) => n.course_id === course.id) ?? [];
   const titles = new Set(nodes.map((n) => studyTitleKey(n.title)));
-  const inserted = plan?.recommended_blocks.every((b) =>
-    titles.has(studyTitleKey(b.title)),
-  );
+  const inserted =
+    Boolean(plan && plan.recommended_blocks.length > 0) &&
+    plan!.recommended_blocks.every((b) =>
+      titles.has(studyTitleKey(b.title)),
+    );
   const opportunity = studyOpportunity(data?.assignments ?? [], course.id, now);
   return (
     <section

@@ -3,13 +3,35 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useEscape, useRestoreFocus } from "@/components/ui";
 import { rankQueue } from "@/lib/engine";
+import { startTour } from "@/lib/tour";
 import { activeCourseOf, isRemote, useTerminal } from "@/store/terminal";
 
 interface Command {
   id: string;
   label: string;
   hint: string;
+  shortcut?: string;
   run: () => void;
+}
+
+function scoreMatch(pattern: string, text: string): number {
+  if (!pattern) return 1;
+  const lowerPattern = pattern.toLowerCase();
+  const lowerText = text.toLowerCase();
+  let pIdx = 0;
+  let score = 0;
+  let prevMatch = -1;
+
+  for (let tIdx = 0; tIdx < lowerText.length && pIdx < lowerPattern.length; tIdx++) {
+    if (lowerText[tIdx] === lowerPattern[pIdx]) {
+      score += 10;
+      if (tIdx === prevMatch + 1) score += 15;
+      if (tIdx === 0 || /[\s\-_/·]/.test(lowerText[tIdx - 1])) score += 25;
+      prevMatch = tIdx;
+      pIdx++;
+    }
+  }
+  return pIdx === lowerPattern.length ? score : 0;
 }
 
 export function CommandPalette({
@@ -52,21 +74,38 @@ function PaletteDialog({
     const course = activeCourseOf({ data, selectedId, activeCourseId });
     const actions: Command[] = [
       {
+        id: "tour",
+        label: "RUN JUDGE DEMO TOUR",
+        hint: "Automated trading desk walkthrough",
+        shortcut: "TOUR",
+        run: () => void startTour(),
+      },
+      {
+        id: "sound",
+        label: store.soundOn ? "MUTE TERMINAL AUDIO" : "ENABLE TERMINAL AUDIO",
+        hint: "Web Audio synthesized clicks & fills",
+        shortcut: "M",
+        run: () => store.toggleSound(),
+      },
+      {
         id: "sync",
         label: "SYNC NOW",
         hint: "POST /api/sync",
+        shortcut: "SYNC",
         run: () => void store.sync(),
       },
       {
         id: "token",
         label: "TOKEN CONFIG",
         hint: "Canvas API token",
+        shortcut: "CONF",
         run: () => store.setTokenOpen(true),
       },
       {
         id: "layout",
         label: "RESET LAYOUT",
         hint: "Restore panel positions",
+        shortcut: "RESET",
         run: onResetLayout,
       },
       {
@@ -75,6 +114,7 @@ function PaletteDialog({
           ? "RETURN TO LIVE CANVAS"
           : "PIN SIMULATION DESK",
         hint: "Ctrl+Shift+D",
+        shortcut: "CTRL+SHIFT+D",
         run: () => void store.toggleSimulation(),
       },
     ];
@@ -83,6 +123,7 @@ function PaletteDialog({
         id: "study-triage",
         label: `GENERATE STUDY TRIAGE · ${course.course_code}`,
         hint: "Scan syllabus, exam guides, and recent scores",
+        shortcut: "STUDY",
         run: () => void store.generateStudyTriage(course.id),
       });
     }
@@ -92,9 +133,24 @@ function PaletteDialog({
         id: "triage",
         label: `EXECUTE AI TRIAGE · ${selected.course_code}`,
         hint: selected.title,
+        shortcut: "T",
         run: () => void store.triage(selected.id),
       });
     }
+    if (selected) {
+      actions.push({
+        id: "simulate-100",
+        label: `WHAT-IF: SIMULATE 100% · ${selected.course_code}`,
+        hint: `Project sensitivity curve for ${selected.title}`,
+        run: () => store.setScenarioScore(selected.id, 100),
+      });
+    }
+    actions.push({
+      id: "reset-scenario",
+      label: "WHAT-IF: RESET SIMULATION SCORES",
+      hint: "Clear what-if scores and return to actual grades",
+      run: () => store.resetScenario(),
+    });
     if (!isRemote(mode)) {
       actions.push({
         id: "reset-sandbox",
@@ -113,6 +169,7 @@ function PaletteDialog({
           id: `go-${assignment.id}`,
           label: `GO ${assignment.course_code}`,
           hint: assignment.title,
+          shortcut: "JUMP",
           run: () => store.select(assignment.id),
         }))
       : [];
@@ -120,11 +177,17 @@ function PaletteDialog({
   }, [data, mode, selectedId, activeCourseId, onResetLayout, openedAt]);
 
   const results = useMemo(() => {
-    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-    return commands.filter((command) => {
-      const haystack = `${command.label} ${command.hint}`.toLowerCase();
-      return terms.every((term) => haystack.includes(term));
-    });
+    const trimmed = query.trim().toLowerCase();
+    if (!trimmed) return commands;
+    const scored = commands
+      .map((command) => {
+        const text = `${command.label} ${command.hint}`;
+        const score = scoreMatch(trimmed, text);
+        return { command, score };
+      })
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => b.score - a.score);
+    return scored.map((s) => s.command);
   }, [commands, query]);
 
   const current = Math.min(active, Math.max(0, results.length - 1));
@@ -213,6 +276,11 @@ function PaletteDialog({
               <span className="min-w-0 flex-1 truncate text-ink-3">
                 {command.hint}
               </span>
+              {command.shortcut && (
+                <kbd className="hidden shrink-0 rounded border border-line px-1.5 py-0.5 text-[9px] text-ink-3 uppercase sm:inline">
+                  {command.shortcut}
+                </kbd>
+              )}
               {index === current && (
                 <span className="shrink-0 text-[10px] text-ink-3">ENTER</span>
               )}
