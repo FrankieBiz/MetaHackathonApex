@@ -15,6 +15,18 @@ Or separately:
 - Backend: `backend/.venv/bin/pytest backend -q` and `backend/.venv/bin/ruff check backend`
 - Frontend: `cd frontend && npm run check`
 
+## Orchestration Model Rules & Memory
+- **Strict Prohibition on Older Models**: Never orchestrate with older or lower-tier models (e.g. no Claude 3.5, no GPT-4o, no legacy tiers).
+- **Mandated Frontier Model Tiers**:
+  1. **OpenAI / Codex**: Use only `gpt-6` or `gpt-6.1` (e.g., `gpt-6.1-sol`, `gpt-6-astra`, high effort).
+  2. **Anthropic / Claude**: Use only the highest available frontier tier (e.g., Claude Opus / Sonnet / Haiku at their absolute latest/highest version, high reasoning).
+  3. **DeepSeek**: Permitted to utilize `deepseek-v4.1-flash` (or DeepSeek V3/R1 flash via the user's active API credit pool `DEEPSEEK_API_KEY`) for high-throughput extraction, batch rubric parsing, and rapid fuzzing.
+- **Model Role Division**:
+  - `gpt-6.1`: Deep backend engineering, Pydantic schemas, Meta Model API integration, strict type safety, algorithm verification.
+  - Frontier Claude: Frontend terminal ergonomics, multimodal vision ingest (syllabi & rubrics), UX polish, and hackathon presentation/narrative.
+  - `deepseek-v4.1-flash`: Fast extraction, low-latency auditor passes, and test fuzzing.
+  - Antigravity: Multi-worker orchestration, file boundary partitioning, test validation (`make check`), and zero-AI git finishes.
+
 ## Mandatory Finish Protocol (Push to Main Production)
 Every single time you finish a task, feature, or fix:
 1. Verify all tests pass (`make check`).
