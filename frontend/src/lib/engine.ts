@@ -414,12 +414,16 @@ export interface Portfolio {
   above: number;
 }
 
-export function portfolio(courses: Course[]): Portfolio {
-  const graded = courses.flatMap((course) =>
-    course.current_score === null || course.portfolio_margin === null
-      ? []
-      : [{ score: course.current_score, margin: course.portfolio_margin }],
-  );
+export function portfolio(
+  courses: Course[],
+  projections?: ReadonlyMap<string, Projection | null>,
+): Portfolio {
+  const graded = courses.flatMap((course) => {
+    const projection = projections?.get(course.id);
+    const score = projection?.grade ?? course.current_score;
+    const margin = projection?.margin ?? course.portfolio_margin;
+    return score === null || margin === null ? [] : [{ score, margin }];
+  });
   if (!graded.length)
     return { average: null, margin: null, graded: 0, above: 0 };
   const mean = (values: number[]) =>

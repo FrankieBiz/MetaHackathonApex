@@ -10,7 +10,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { TrajectoryChart } from "@/components/TrajectoryChart";
+import { TrajectoryChart, WhatIfBar } from "@/components/TrajectoryChart";
 import { Panel, Segmented } from "@/components/ui";
 import { useNow } from "@/hooks/useNow";
 import {
@@ -19,6 +19,7 @@ import {
   projectGrade,
   simulatable,
   studyRecommendation,
+  type Projection,
   type Scenario,
 } from "@/lib/engine";
 import { minutes, pct, shortDate, signed } from "@/lib/format";
@@ -38,11 +39,15 @@ interface Point {
 }
 
 /** Shared y-scale so the small multiples compare honestly. */
-function sharedDomain(courses: Course[]): [number, number] {
+function sharedDomain(
+  courses: Course[],
+  projections: ReadonlyMap<string, Projection | null>,
+): [number, number] {
   const values = courses.flatMap((course) => [
     course.target_score,
     ...(course.current_score === null ? [] : [course.current_score]),
     ...course.grade_history.map((point) => point.score),
+    ...Array.from(projections.get(course.id)?.path ?? [], (point) => point.score),
   ]);
   if (!values.length) return [80, 100];
   return [
@@ -85,6 +90,7 @@ function CurveTooltip({
 
 const CourseTile = memo(function CourseTile({
   course,
+  projection,
   domain,
   recommendation,
   focused,
@@ -92,18 +98,31 @@ const CourseTile = memo(function CourseTile({
   onOpenSource,
 }: {
   course: Course;
+  projection: Projection | null;
   domain: [number, number];
   recommendation: StudyRecommendation | null;
   focused: boolean;
   onFocus: (id: string) => void;
   onOpenSource: (id: string) => void;
 }) {
-  const series = seriesFor(course);
-  const graded =
-    course.current_score !== null && course.portfolio_margin !== null;
-  const up = (course.portfolio_margin ?? 0) >= 0;
+  const history = seriesFor(course);
+  const simulating =
+    projection !== null && projection.grade !== course.current_score;
+  const series = simulating
+    ? [
+        ...history,
+        ...projection.path.map((point) => ({
+          at: new Date(point.at).toISOString(),
+          score: point.score,
+        })),
+      ]
+    : history;
+  const score = projection?.grade ?? course.current_score;
+  const margin = projection?.margin ?? course.portfolio_margin;
+  const graded = score !== null && margin !== null;
+  const up = (margin ?? 0) >= 0;
   const color = up ? UP : DOWN;
-  const drift = driftOf(series);
+  const drift = driftOf(history);
 
   return (
     <article
@@ -125,14 +144,17 @@ const CourseTile = memo(function CourseTile({
           </span>
           <span className="truncate text-[11px] text-ink-3">{course.name}</span>
         </button>
-        <span className="text-[13px] text-ink">
-          {course.current_score === null ? "—" : pct(course.current_score)}
+        <span
+          className={`text-[13px] ${simulating ? (up ? "text-up" : "text-down") : "text-ink"}`}
+        >
+          {simulating && <span className="text-[10px] text-ink-3">PROJ </span>}
+          {score === null ? "—" : pct(score)}
         </span>
       </div>
       <div className="flex items-baseline justify-between gap-2 text-[11px]">
         {graded ? (
           <span style={{ color }}>
-            {up ? "▲" : "▼"} {signed(course.portfolio_margin ?? 0)}% MARGIN
+            {up ? "▲" : "▼"} {signed(margin ?? 0)}% MARGIN
           </span>
         ) : (
           <span className="text-ink-3">NO GRADE YET</span>
@@ -228,18 +250,20 @@ export function EquityCurve() {
   const courses = useTerminal((s) => s.data?.courses ?? NO_COURSES);
   const assignments = useTerminal((s) => s.data?.assignments ?? NO_ASSIGNMENTS);
   const select = useTerminal((s) => s.select);
+  const selectedId = useTerminal((s) => s.selectedId);
   const selectedCourse = useTerminal(
     (s) =>
-      s.data?.assignments.find((a) => a.id === s.selectedId)?.course_id ?? null,
+      s.data?.assignments.find((a) => a.id === s.selectedId)?.course_id ??
+      s.activeCourseId,
   );
   const [view, setView] = useState<"graph" | "table">("graph");
   const [scenario, setScenario] = useState<Scenario>({});
-  // Focus follows the execution deck's course until a tile is clicked, and
-  // follows again the next time the deck moves to another course.
+  // A tile can focus another course until the execution deck's selection changes.
   const [picked, setPicked] = useState<string | null>(null);
-  const [followed, setFollowed] = useState(selectedCourse);
-  if (followed !== selectedCourse) {
-    setFollowed(selectedCourse);
+  const selection = selectedId ?? selectedCourse;
+  const [followed, setFollowed] = useState(selection);
+  if (followed !== selection) {
+    setFollowed(selection);
     setPicked(null);
   }
   const focus =
@@ -268,7 +292,20 @@ export function EquityCurve() {
     [],
   );
 
-  const domain = useMemo(() => sharedDomain(courses), [courses]);
+  const projections = useMemo(
+    () =>
+      new Map(
+        courses.map((course) => [
+          course.id,
+          projectGrade(course, simulatable(course.id, assignments), scenario, now),
+        ]),
+      ),
+    [courses, assignments, scenario, now],
+  );
+  const domain = useMemo(
+    () => sharedDomain(courses, projections),
+    [courses, projections],
+  );
   const recommendations = useMemo(
     () =>
       new Map(
@@ -280,11 +317,25 @@ export function EquityCurve() {
     [courses, assignments],
   );
 
-  const book = portfolio(courses);
+  const book = portfolio(courses, projections);
 
   return (
     <Panel
       title="EQUITY CURVE // GRADE TRAJECTORY & MARGIN"
+      footer={
+        focus && (
+          <WhatIfBar
+            key={focus.id}
+            course={focus}
+            assignments={assignments}
+            scenario={scenario}
+            selectedId={selectedId}
+            onSelect={select}
+            onScore={setScore}
+            onReset={resetScores}
+          />
+        )
+      }
       actions={
         <Segmented
           label="Equity curve view"
@@ -298,6 +349,10 @@ export function EquityCurve() {
       }
     >
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-0.5 border-b border-line px-2.5 py-1.5 text-[11px]">
+        {courses.some((course) => {
+          const projection = projections.get(course.id);
+          return projection && projection.grade !== course.current_score;
+        }) && <span className="text-accent">WHAT-IF ACTIVE</span>}
         <span>
           <span className="text-ink-3">PORTFOLIO </span>
           <span className="text-[14px] text-ink">
@@ -340,6 +395,7 @@ export function EquityCurve() {
               <CourseTile
                 key={course.id}
                 course={course}
+                projection={projections.get(course.id) ?? null}
                 domain={domain}
                 recommendation={recommendations.get(course.id) ?? null}
                 focused={course.id === focus?.id}
@@ -380,16 +436,11 @@ export function EquityCurve() {
           <tbody>
             {courses.map((course) => {
               const drift = driftOf(seriesFor(course));
-              const margin = course.portfolio_margin;
+              const whatIf = projections.get(course.id);
+              const margin = whatIf?.margin ?? course.portfolio_margin;
               const open = assignments.filter(
                 (a) => a.course_id === course.id && isActive(a),
               ).length;
-              const whatIf = projectGrade(
-                course,
-                simulatable(course.id, assignments),
-                scenario,
-                now,
-              );
               return (
                 <tr key={course.id} className="border-b border-line/70">
                   <th

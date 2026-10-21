@@ -349,6 +349,51 @@ describe("what-if projection", () => {
     expect(projection.margin).toBeCloseTo(-0.7);
   });
 
+  it.each([
+    [5, 0, 87.78, 91.54, 0.04, 1],
+    [5, 50, 90.28, 92.79, 1.29, 2],
+    [30, 50, 79.68, 87.49, -4.01, 1],
+    [30, 85, 90.18, 92.74, 1.24, 2],
+    [30, 98, 94.08, 94.69, 3.19, 2],
+    [30, 100, 94.68, 94.99, 3.49, 2],
+  ])(
+    "projects weight %s and score %s into the course and portfolio",
+    (weight, score, grade, average, margin, above) => {
+      const deliverable = assignment("midterm", weight, at(24));
+      const projection = projectGrade(
+        course,
+        [deliverable],
+        { midterm: score },
+        NOW,
+      )!;
+      const peer = {
+        ...course,
+        id: "peer",
+        current_score: 95.3,
+        target_score: 93,
+        portfolio_margin: 2.3,
+      };
+      const courses = [course, peer];
+      const book = portfolio(courses, new Map([[course.id, projection]]));
+
+      expect(projection.grade).toBeCloseTo(grade);
+      expect(projection.margin).toBeCloseTo(grade - 90);
+      expect(projection.path.at(-1)?.score).toBeCloseTo(grade);
+      expect(book.average).toBeCloseTo(average);
+      expect(book.margin).toBeCloseTo(margin);
+      expect(book.above).toBe(above);
+      expect(book.graded).toBe(2);
+      // Clearing the scenario restores the posted grades without mutating them.
+      const reset = projectGrade(course, [deliverable], {}, NOW);
+      const resetBook = portfolio(courses, new Map([[course.id, reset]]));
+      expect(resetBook.average).toBeCloseTo(93.85);
+      expect(resetBook.margin).toBeCloseTo(2.35);
+      expect(resetBook.above).toBe(2);
+      expect(course.current_score).toBe(92.4);
+      expect(peer.current_score).toBe(95.3);
+    },
+  );
+
   it("finds the single score on open work that lands exactly on target", () => {
     const { breakEven } = projectGrade(course, [lab, quiz], {}, NOW)!;
     // 92.4 + (90 − 92.4) × 100 / 40
