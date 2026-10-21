@@ -232,8 +232,8 @@ function StatusBar() {
         <span className="hidden shrink-0 text-ink-3 md:inline">
           API {API_BASE.replace(/^https?:\/\//, "")}
         </span>
-        <span className="hidden shrink-0 text-ink-3 md:inline">
-          ⌘/CTRL+K COMMANDS · ↑↓ QUEUE · CTRL+SHIFT+D SIM
+        <span className="hidden shrink-0 text-ink-3 lg:inline">
+          ⌘/CTRL+K CMDS · J/K QUEUE · T TRIAGE · M AUDIO · CTRL+SHIFT+D SIM · ? HELP
         </span>
       </div>
     </footer>

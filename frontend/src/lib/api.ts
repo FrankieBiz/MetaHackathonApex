@@ -53,7 +53,8 @@ async function request(
     });
   } catch (error) {
     const timedOut =
-      error instanceof DOMException && error.name === "TimeoutError";
+      (error instanceof DOMException && error.name === "TimeoutError") ||
+      (error instanceof Error && error.name === "TimeoutError");
     throw timedOut
       ? new ApiError(
           `No response from ${API_BASE} within ${timeoutMs / 1000}s`,
