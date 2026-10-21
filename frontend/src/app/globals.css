@@ -226,3 +226,29 @@
     transition: none;
   }
 }
+
+/* ---------------------------------------------------------- dossier print */
+
+/* PRINT on the dossier prints only its body, as dark ink on paper. */
+@media print {
+  body:has(.dossier-print) * {
+    visibility: hidden;
+  }
+
+  body:has(.dossier-print) .dossier-print,
+  body:has(.dossier-print) .dossier-print * {
+    visibility: visible;
+    color: #000 !important;
+    background: transparent !important;
+    border-color: #999 !important;
+  }
+
+  body:has(.dossier-print) .dossier-print {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    max-height: none;
+    overflow: visible;
+  }
+}

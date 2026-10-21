@@ -4,6 +4,12 @@
 import { z } from "zod";
 import { createMockState } from "@/lib/mockData";
 import {
+  ACADEMIC_STANCES,
+  generateLocalReport,
+  type PortfolioReport,
+  type ReportFormat,
+} from "@/lib/portfolioReport";
+import {
   simulateLocally,
   type MonteCarloRequest,
   type MonteCarloResponse,
@@ -728,6 +734,116 @@ export async function simulateMonteCarlo(
   }
 }
 
+// ------------------------------------------------------ portfolio dossier
+
+/** Report synthesis may call the model; past this the local synthesizer answers. */
+const REPORT_DEADLINE_MS = 30_000;
+
+const nullableFinite = finite.nullable().catch(null);
+
+// The contract's telemetry, or the backend's InferenceTelemetry; both read as one shape.
+const ReportTelemetryBody = z.union([
+  z.object({
+    model: z.string(),
+    provider: z.string().nullable().catch(null),
+    tokens_per_second: finite.nonnegative().nullable().catch(null),
+    latency_ms: finite.nonnegative(),
+  }),
+  z
+    .object({
+      model_used: z.string(),
+      latency_ms: finite.nonnegative(),
+      tokens_per_sec: finite.nonnegative().nullable().catch(null),
+    })
+    .transform((t) => ({
+      model: t.model_used,
+      provider: null,
+      tokens_per_second: t.tokens_per_sec,
+      latency_ms: t.latency_ms,
+    })),
+]);
+
+const PortfolioReportBody = z.object({
+  generated_at: z.string().refine((at) => !Number.isNaN(Date.parse(at)), {
+    message: "generated_at must be a timestamp",
+  }),
+  executive_summary: z.string().trim().min(1),
+  academic_stance: z.enum(ACADEMIC_STANCES),
+  projected_gpa: finite.min(0).max(4.3),
+  portfolio_score: finite,
+  target_score: finite,
+  margin: finite,
+  downside_var_90: finite.min(0),
+  course_breakdown: z.array(
+    z.object({
+      course_id: id,
+      course_code: z.string().catch("COURSE"),
+      name: z.string().catch(""),
+      current_score: nullableFinite,
+      target_score: finite,
+      status: z.string().catch("UNRATED"),
+      var_90: nullableFinite,
+      probability_of_target: finite.min(0).max(1).nullable().catch(null),
+      remaining_weight: finite.catch(0),
+    }),
+  ),
+  high_leverage_actions: z.array(
+    z.object({
+      assignment_id: id,
+      course_code: z.string().catch("COURSE"),
+      title: z.string().catch("Untitled deliverable"),
+      weight: finite,
+      marginal_impact: finite,
+      due_at: z.string().nullable().catch(null),
+      priority_score: finite.catch(0),
+    }),
+  ),
+  telemetry: ReportTelemetryBody.nullable().catch(null),
+});
+
+/**
+ * A dossier request. Like a feed read it never rejects: an offline desk, or a
+ * slow, failing, or malformed backend answer, is synthesized locally from
+ * `state` instead, flagged `local` with the cause attached.
+ */
+export type PortfolioReportRun =
+  | { source: "backend"; report: PortfolioReport }
+  | { source: "local"; report: PortfolioReport; cause: ApiError };
+
+export async function portfolioReport(
+  state: Pick<TerminalState, "courses" | "assignments">,
+  {
+    offline = false,
+    format = "markdown",
+  }: { offline?: boolean; format?: ReportFormat } = {},
+): Promise<PortfolioReportRun> {
+  const local = (cause: ApiError): PortfolioReportRun => ({
+    source: "local",
+    report: generateLocalReport(state),
+    cause,
+  });
+  // The pinned or detached desk never contacts the backend.
+  if (offline) {
+    return local(new ApiError("Simulation desk is offline", "network"));
+  }
+  try {
+    const report = PortfolioReportBody.parse(
+      await request(
+        "/api/v1/portfolio/report",
+        { method: "POST", body: JSON.stringify({ format }) },
+        REPORT_DEADLINE_MS,
+      ),
+    );
+    return { source: "backend", report };
+  } catch (error) {
+    return local(
+      error instanceof ApiError
+        ? error
+        : new ApiError("/api/v1/portfolio/report sent a malformed dossier", "parse"),
+    );
+  }
+}
+
 export const api = {
   state: () => intercept(readState),
 
@@ -838,6 +954,7 @@ export const api = {
   loadSyllabusPreset,
 
   simulateMonteCarlo,
+  portfolioReport,
 
   patchSubtask: (
     subtaskId: string,

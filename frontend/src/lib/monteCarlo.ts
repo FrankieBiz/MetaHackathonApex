@@ -96,6 +96,8 @@ export function simulateCourse(
   assignments: Assignment[],
   iterations: number,
   overrides: Record<string, number>,
+  /** Receives the unsorted simulated grades, path by path, when a distribution is drawn. */
+  pathSamples?: number[],
 ): CourseSimulation {
   const remaining = remainingWork(course.id, assignments);
   const openWeight = remaining.reduce((sum, a) => sum + a.weight, 0);
@@ -159,6 +161,7 @@ export function simulateCourse(
         marginal_impact * Math.min(100, Math.max(0, baseline + spread * z));
     }
   });
+  pathSamples?.push(...paths);
   paths.sort();
 
   const percentiles: ScorePercentiles = {

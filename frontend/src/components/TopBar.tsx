@@ -14,6 +14,10 @@ import {
   useSyllabusIngest,
 } from "@/components/SyllabusIngestModal";
 import { MonteCarloModal, useMonteCarlo } from "@/components/MonteCarloModal";
+import {
+  PortfolioReportModal,
+  useDossier,
+} from "@/components/PortfolioReportModal";
 import { useNow } from "@/hooks/useNow";
 import {
   assignmentVolatility,
@@ -428,6 +432,7 @@ export function TopBar() {
   const setPaletteOpen = useTerminal((s) => s.setPaletteOpen);
   const setSyllabusOpen = useSyllabusIngest((s) => s.setOpen);
   const setMonteCarloOpen = useMonteCarlo((s) => s.setOpen);
+  const setDossierOpen = useDossier((s) => s.setOpen);
   const modifier = useModifierLabel();
 
   return (
@@ -491,6 +496,13 @@ export function TopBar() {
             WHAT-IF // VaR
           </Key>
           <Key
+            onClick={() => setDossierOpen(true)}
+            title="Academic standing dossier: executive memo and audit metrics (hotkey R)"
+            aria-label="Open the academic standing dossier"
+          >
+            DOSSIER // MEMO
+          </Key>
+          <Key
             onClick={() => setTokenOpen(true)}
             aria-label="Configure Canvas API token"
           >
@@ -508,6 +520,7 @@ export function TopBar() {
       <Tape />
       <SyllabusIngestModal />
       <MonteCarloModal />
+      <PortfolioReportModal />
     </header>
   );
 }

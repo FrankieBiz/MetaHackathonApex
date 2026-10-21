@@ -14,6 +14,7 @@ import { OrderBook } from "@/components/OrderBook";
 import { TaskTree } from "@/components/TaskTree";
 import { TokenModal } from "@/components/TokenModal";
 import { TopBar } from "@/components/TopBar";
+import { useDossier } from "@/components/PortfolioReportModal";
 import { Key, Spinner } from "@/components/ui";
 import { API_BASE } from "@/lib/api";
 import { stamp } from "@/lib/format";
@@ -121,6 +122,15 @@ function useHotkeys() {
         if (state.selectedId) {
           event.preventDefault();
           void state.triage(state.selectedId);
+        }
+        return;
+      }
+
+      // Academic standing dossier (R)
+      if (key === "r" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        if (state.data) {
+          event.preventDefault();
+          useDossier.getState().setOpen(true);
         }
         return;
       }
@@ -234,7 +244,7 @@ function StatusBar() {
           API {API_BASE.replace(/^https?:\/\//, "")}
         </span>
         <span className="hidden shrink-0 text-ink-3 lg:inline">
-          ⌘/CTRL+K CMDS · J/K QUEUE · T TRIAGE · M AUDIO · CTRL+SHIFT+D SIM · ? HELP
+          ⌘/CTRL+K CMDS · J/K QUEUE · T TRIAGE · R DOSSIER · M AUDIO · CTRL+SHIFT+D SIM · ? HELP
         </span>
       </div>
     </footer>

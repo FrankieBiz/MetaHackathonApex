@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useEscape, useRestoreFocus } from "@/components/ui";
 import { useSyllabusIngest } from "@/components/SyllabusIngestModal";
 import { useMonteCarlo } from "@/components/MonteCarloModal";
+import { useDossier } from "@/components/PortfolioReportModal";
 import { rankQueue } from "@/lib/engine";
 import { startTour } from "@/lib/tour";
 import { exportPortfolio } from "@/lib/portfolioExport";
@@ -170,6 +171,13 @@ function PaletteDialog({
       hint: "Grade quantiles, 90% VaR, leverage ranking & score shocks",
       shortcut: "VAR",
       run: () => useMonteCarlo.getState().setOpen(true),
+    });
+    actions.push({
+      id: "dossier",
+      label: "DOSSIER // MEMO: ACADEMIC STANDING REPORT",
+      hint: "Executive memo, audit metrics, copy / download / print",
+      shortcut: "R",
+      run: () => useDossier.getState().setOpen(true),
     });
     actions.push({
       id: "reset-scenario",
