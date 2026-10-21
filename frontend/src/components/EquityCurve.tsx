@@ -14,11 +14,13 @@ import { TrajectoryChart, WhatIfBar } from "@/components/TrajectoryChart";
 import { Panel, Segmented } from "@/components/ui";
 import { useNow } from "@/hooks/useNow";
 import {
+  forecastGrade,
   isActive,
   portfolio,
   projectGrade,
   simulatable,
   studyRecommendation,
+  type Forecast,
   type Projection,
 } from "@/lib/engine";
 import { minutes, pct, shortDate, signed } from "@/lib/format";
@@ -90,6 +92,7 @@ function CurveTooltip({
 const CourseTile = memo(function CourseTile({
   course,
   projection,
+  forecast,
   domain,
   recommendation,
   focused,
@@ -98,6 +101,7 @@ const CourseTile = memo(function CourseTile({
 }: {
   course: Course;
   projection: Projection | null;
+  forecast: Forecast | null;
   domain: [number, number];
   recommendation: StudyRecommendation | null;
   focused: boolean;
@@ -218,6 +222,17 @@ const CourseTile = memo(function CourseTile({
           </ResponsiveContainer>
         </div>
       )}
+      {forecast && (
+        <div className="flex flex-wrap justify-between gap-x-3 text-[10px] tracking-wider text-ink-3 uppercase">
+          <span>
+            P10–P90 {pct(forecast.final.p10)}–{pct(forecast.final.p90)}
+          </span>
+          <span>
+            P(≥ target){" "}
+            <span className="text-ink">{Math.round(forecast.probability)}%</span>
+          </span>
+        </div>
+      )}
       {recommendation && (
         <div className="mt-0.5 border-l-2 border-accent bg-accent/10 px-2 py-1 text-[11px]">
           <div className="flex items-center justify-between gap-2">
@@ -300,6 +315,16 @@ export function EquityCurve() {
         ]),
       ),
     [courses, assignments, scenario, now],
+  );
+  const forecasts = useMemo(
+    () =>
+      new Map(
+        courses.map((course) => [
+          course.id,
+          forecastGrade(course, simulatable(course.id, assignments), scenario),
+        ]),
+      ),
+    [courses, assignments, scenario],
   );
   const domain = useMemo(
     () => sharedDomain(courses, projections),
@@ -395,6 +420,7 @@ export function EquityCurve() {
                 key={course.id}
                 course={course}
                 projection={projections.get(course.id) ?? null}
+                forecast={forecasts.get(course.id) ?? null}
                 domain={domain}
                 recommendation={recommendations.get(course.id) ?? null}
                 focused={course.id === focus?.id}
@@ -427,6 +453,12 @@ export function EquityCurve() {
               <th scope="col" className="px-2 py-1 text-right font-normal">
                 What-if
               </th>
+              <th scope="col" className="px-2 py-1 text-right font-normal">
+                P10–P90
+              </th>
+              <th scope="col" className="px-2 py-1 text-right font-normal">
+                P(≥ target)
+              </th>
               <th scope="col" className="py-1 pr-2.5 text-right font-normal">
                 Open
               </th>
@@ -436,6 +468,7 @@ export function EquityCurve() {
             {courses.map((course) => {
               const drift = driftOf(seriesFor(course));
               const whatIf = projections.get(course.id);
+              const forecast = forecasts.get(course.id) ?? null;
               const margin = whatIf?.margin ?? course.portfolio_margin;
               const open = assignments.filter(
                 (a) => a.course_id === course.id && isActive(a),
@@ -476,6 +509,14 @@ export function EquityCurve() {
                     {whatIf && whatIf.grade !== course.current_score
                       ? `${whatIf.margin >= 0 ? "▲" : "▼"} ${pct(whatIf.grade)}`
                       : "—"}
+                  </td>
+                  <td className="px-2 py-1 text-right text-ink-2">
+                    {forecast
+                      ? `${pct(forecast.final.p10)}–${pct(forecast.final.p90)}`
+                      : "—"}
+                  </td>
+                  <td className="px-2 py-1 text-right text-ink">
+                    {forecast ? `${Math.round(forecast.probability)}%` : "—"}
                   </td>
                   <td
                     className={`py-1 pr-2.5 text-right ${open ? "text-ink" : "text-accent"}`}

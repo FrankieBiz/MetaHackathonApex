@@ -13,6 +13,7 @@ import {
   logMinutes,
   portfolio,
   priorityScore,
+  forecastGrade,
   projectGrade,
   simulatable,
   velocityByCourse,
@@ -532,6 +533,101 @@ describe("what-if projection", () => {
   it("has nothing to project from before the first posted grade", () => {
     expect(
       projectGrade({ ...course, current_score: null }, [lab], {}, NOW),
+    ).toBeNull();
+  });
+});
+
+describe("monte carlo forecast", () => {
+  const course: Course = {
+    id: "c",
+    course_code: "CS 1",
+    name: "Course",
+    current_score: 92.4,
+    target_score: 90,
+    portfolio_margin: 2.4,
+    grade_history: [],
+  };
+  const open = (id: string, weight: number): Assignment =>
+    ({
+      id,
+      course_id: "c",
+      course_code: "CS 1",
+      title: id,
+      due_at: at(24),
+      points_possible: 100,
+      weight,
+      description: null,
+      status: "pending",
+      graded: false,
+      priority_score: 0,
+      subtasks: [],
+    }) as Assignment;
+  const lab = open("lab", 25);
+  const quiz = open("quiz", 15);
+
+  it("collapses onto the projection when there is no spread", () => {
+    const forecast = forecastGrade(course, [lab, quiz], { lab: 80 }, 500, 0)!;
+    const projection = projectGrade(course, [lab, quiz], { lab: 80 }, NOW)!;
+    expect(forecast.final.p10).toBeCloseTo(projection.grade);
+    expect(forecast.final.p90).toBeCloseTo(projection.grade);
+    forecast.path.forEach((band, index) =>
+      expect(band.p50).toBeCloseTo(projection.path[index].score),
+    );
+  });
+
+  it("orders its percentiles and brackets the current grade when centred on it", () => {
+    const forecast = forecastGrade(course, [lab, quiz], {}, 2000)!;
+    expect(forecast.final.p10).toBeLessThanOrEqual(forecast.final.p50);
+    expect(forecast.final.p50).toBeLessThanOrEqual(forecast.final.p90);
+    expect(forecast.final.p10).toBeLessThan(92.4);
+    expect(forecast.final.p90).toBeGreaterThan(92.4);
+    expect(forecast.path).toHaveLength(3);
+    expect(forecast.path[0]).toEqual({ p10: 92.4, p50: 92.4, p90: 92.4 });
+  });
+
+  it("is reproducible for identical inputs", () => {
+    expect(forecastGrade(course, [lab, quiz], {})).toEqual(
+      forecastGrade(course, [lab, quiz], {}),
+    );
+  });
+
+  it("reports P(final ≥ target) as a percent", () => {
+    // Centred exactly on target: the final grade is a coin flip.
+    const coin = forecastGrade(
+      { ...course, target_score: 92.4 },
+      [lab, quiz],
+      {},
+    )!;
+    expect(coin.probability).toBeGreaterThan(40);
+    expect(coin.probability).toBeLessThan(60);
+    // Every open deliverable locked at 100 lands above target with no spread.
+    const sure = forecastGrade(
+      course,
+      [lab, quiz],
+      { lab: 100, quiz: 100 },
+      200,
+      0,
+    )!;
+    expect(sure.probability).toBe(100);
+    const lost = forecastGrade(
+      course,
+      [lab, quiz],
+      { lab: 0, quiz: 0 },
+      200,
+      0,
+    )!;
+    expect(lost.probability).toBe(0);
+  });
+
+  it("has no uncertainty left once all work is graded", () => {
+    const forecast = forecastGrade(course, [], {})!;
+    expect(forecast.final).toEqual({ p10: 92.4, p50: 92.4, p90: 92.4 });
+    expect(forecast.probability).toBe(100);
+  });
+
+  it("returns null without a posted grade", () => {
+    expect(
+      forecastGrade({ ...course, current_score: null }, [lab], {}),
     ).toBeNull();
   });
 });

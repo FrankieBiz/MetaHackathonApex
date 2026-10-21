@@ -907,6 +907,93 @@ export function projectGrade(
   };
 }
 
+// ------------------------------------------------------ monte carlo forecast
+
+/** Standard deviation, in points, of each open deliverable around its hypothesized score. */
+export const FORECAST_SPREAD = 10;
+export const FORECAST_TRIALS = 2000;
+/** Fixed seed: the same inputs always draw the same bands, so renders never jitter. */
+const FORECAST_SEED = 0x5eed;
+
+export interface Band {
+  p10: number;
+  p50: number;
+  p90: number;
+}
+
+export interface Forecast {
+  /** Band on the final grade across all trials. */
+  final: Band;
+  /** P(Final ≥ target) as a 0–100 percent. */
+  probability: number;
+  /** Bands after each step, index-aligned with Projection.path (path[0] is the current grade). */
+  path: Band[];
+  trials: number;
+}
+
+/** Mulberry32: a small seeded PRNG, so the simulation is reproducible. */
+function seededRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Nearest-rank quantile of an unsorted sample. */
+function bandOf(values: Float64Array): Band {
+  const sorted = Float64Array.from(values).sort();
+  const at = (q: number) =>
+    sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))];
+  return { p10: at(0.1), p50: at(0.5), p90: at(0.9) };
+}
+
+/**
+ * Monte Carlo over the same model as projectGrade. Each open deliverable's
+ * score is drawn from a normal centred on its hypothesized score (the current
+ * grade when unset), clipped to 0–100; graded work stays held at the current
+ * grade. Returns null without a posted grade.
+ */
+export function forecastGrade(
+  course: Course,
+  open: Assignment[],
+  scenario: Scenario,
+  trials = FORECAST_TRIALS,
+  spread = FORECAST_SPREAD,
+): Forecast | null {
+  const current = course.current_score;
+  if (current === null) return null;
+  const openWeight = open.reduce((sum, a) => sum + a.weight, 0);
+  const total = Math.max(100, openWeight);
+  const random = seededRandom(FORECAST_SEED);
+  const gaussian = () =>
+    Math.sqrt(-2 * Math.log(Math.max(random(), 1e-12))) *
+    Math.cos(2 * Math.PI * random());
+
+  const running = new Float64Array(trials).fill(current);
+  const path: Band[] = [bandOf(running)];
+  for (const a of open) {
+    const mean = scenario[a.id] ?? current;
+    const scale = a.weight / total;
+    for (let trial = 0; trial < trials; trial += 1) {
+      const score = Math.min(100, Math.max(0, mean + spread * gaussian()));
+      running[trial] += scale * (score - current);
+    }
+    path.push(bandOf(running));
+  }
+
+  const hits = running.filter((grade) => grade >= course.target_score).length;
+  return {
+    final: path[path.length - 1],
+    probability: (hits / trials) * 100,
+    path,
+    trials,
+  };
+}
+
 // ---------------------------------------------------------- grade history
 
 /** Appends a sync snapshot when the score moved or the last point is 6h old. */

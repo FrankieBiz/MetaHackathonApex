@@ -16,8 +16,10 @@ import { Key } from "@/components/ui";
 import { useNow } from "@/hooks/useNow";
 import {
   DAY,
+  forecastGrade,
   projectGrade,
   simulatable,
+  type Forecast,
   type Projection,
   type Scenario,
 } from "@/lib/engine";
@@ -38,6 +40,9 @@ interface Row {
   t: number;
   score?: number;
   projected?: number;
+  /** Monte Carlo 10th and 90th percentile at this projection step. */
+  low?: number;
+  high?: number;
   /** Projection steps carry the assignment whose deadline they land on. */
   step?: string | null;
 }
@@ -45,6 +50,7 @@ interface Row {
 function rowsFor(
   course: Course,
   projection: Projection | null,
+  forecast: Forecast | null,
   now: number,
 ): Row[] {
   const history = course.grade_history
@@ -53,18 +59,28 @@ function rowsFor(
     .sort((x, y) => x.t - y.t);
   const recent = history.filter((point) => point.t >= now - LOOKBACK);
   const shown = recent.length >= 2 ? recent : history.slice(-2);
-  const steps = (projection?.path ?? []).map((step) => ({
+  const steps = (projection?.path ?? []).map((step, index) => ({
     t: step.at,
     projected: step.score,
+    low: forecast?.path[index]?.p10,
+    high: forecast?.path[index]?.p90,
     step: step.assignment_id,
   }));
   return [...shown, ...steps];
 }
 
+/** Ranged Area value: the P10–P90 band, or null where no projection exists. */
+const bandRange = (row: Row): [number, number] | null =>
+  row.low !== undefined && row.high !== undefined
+    ? [row.low, row.high]
+    : null;
+
 /** Snaps to 5-point bands so the axis holds still while a slider moves. */
 function domainFor(rows: Row[], target: number): [number, number] {
   const values = rows.flatMap((row) =>
-    [row.score, row.projected].filter((v): v is number => v !== undefined),
+    [row.score, row.projected, row.low, row.high].filter(
+      (v): v is number => v !== undefined,
+    ),
   );
   values.push(target);
   return [
@@ -475,9 +491,13 @@ export function TrajectoryChart({
     () => projectGrade(course, open, scenario, now),
     [course, open, scenario, now],
   );
+  const forecast = useMemo(
+    () => forecastGrade(course, open, scenario),
+    [course, open, scenario],
+  );
   const rows = useMemo(
-    () => rowsFor(course, projection, now),
-    [course, projection, now],
+    () => rowsFor(course, projection, forecast, now),
+    [course, projection, forecast, now],
   );
   const domain = useMemo(
     () => domainFor(rows, course.target_score),
@@ -531,6 +551,15 @@ export function TrajectoryChart({
             {simulating ? "Projected margin" : "Margin of safety"}
           </span>
           <MarginOfSafety margin={margin} target={course.target_score} />
+          {forecast && (
+            <span
+              className="text-[11px] whitespace-nowrap text-ink-2"
+              title={`Monte Carlo over ${forecast.trials} trials; P(final ≥ ${pct(course.target_score)})`}
+            >
+              <span className="text-ink-3">P(≥ TARGET) </span>
+              {Math.round(forecast.probability)}%
+            </span>
+          )}
         </div>
       </div>
 
@@ -544,7 +573,11 @@ export function TrajectoryChart({
           <p className="sr-only">
             {course.course_code} is at {pct(current)} against a{" "}
             {pct(course.target_score)} target
-            {projection ? `, projected ${pct(projection.grade)}` : ""}. Use the
+            {projection ? `, projected ${pct(projection.grade)}` : ""}
+            {forecast
+              ? `, with a 10th to 90th percentile range of ${pct(forecast.final.p10)} to ${pct(forecast.final.p90)} and a ${Math.round(forecast.probability)}% chance of meeting the target`
+              : ""}
+            . Use the
             sliders below to change the hypothetical scores; the table view
             lists every course.
           </p>
@@ -618,6 +651,18 @@ export function TrajectoryChart({
                 />
                 <Area
                   type="linear"
+                  dataKey={bandRange}
+                  name="P10–P90 band"
+                  stroke="none"
+                  fill={projectedColor}
+                  fillOpacity={0.14}
+                  isAnimationActive={false}
+                  connectNulls
+                  activeDot={false}
+                  dot={false}
+                />
+                <Area
+                  type="linear"
                   dataKey="score"
                   stroke={actualColor}
                   strokeWidth={2}
@@ -677,6 +722,19 @@ export function TrajectoryChart({
             <span className="flex items-center gap-1">
               <Swatch color={INK_3} dash="3 3" /> Target
             </span>
+            {forecast && (
+              <span className="flex items-center gap-1">
+                <span
+                  aria-hidden
+                  className="inline-block h-[6px] w-4 shrink-0"
+                  style={{ background: projectedColor, opacity: 0.3 }}
+                />
+                P10–P90 {pct(forecast.final.p10)}–{pct(forecast.final.p90)}
+                <span className="text-ink-2">
+                  · P50 {pct(forecast.final.p50)}
+                </span>
+              </span>
+            )}
           </div>
 
           <div className="flex items-center justify-between gap-2 border-t border-line bg-head px-2.5 py-0.5">
