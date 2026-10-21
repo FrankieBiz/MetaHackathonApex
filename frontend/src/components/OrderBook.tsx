@@ -30,6 +30,7 @@ import {
 import { countdown, score as fmtScore } from "@/lib/format";
 import { activeCourseOf, isRemote, useTerminal } from "@/store/terminal";
 import { studyOpportunity } from "@/lib/study";
+import { exportPortfolio } from "@/lib/portfolioExport";
 import type { Assignment, Course } from "@/types";
 
 const TIER_COLOR: Record<PriorityTier, string> = {
@@ -443,6 +444,7 @@ function Inspector() {
 }
 
 export function OrderBook() {
+  const data = useTerminal((s) => s.data);
   const courses = useTerminal((s) => s.data?.courses);
   const activeCourse = useTerminal(activeCourseOf);
   const selectCourse = useTerminal((s) => s.selectCourse);
@@ -517,6 +519,13 @@ export function OrderBook() {
           aria-label="Active course for study triage"
           className="flex shrink-0 flex-wrap gap-2 border-b border-line px-2.5 py-2"
         >
+          <Key
+            onClick={() => data && exportPortfolio(data)}
+            disabled={!data}
+            title="Download all courses and assignments, including filled work, as CSV"
+          >
+            EXPORT PORTFOLIO (CSV)
+          </Key>
           {courses?.map((course) => {
             const opportunity = studyOpportunity(assignments, course.id, now);
             return (

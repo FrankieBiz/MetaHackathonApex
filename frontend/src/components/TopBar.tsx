@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { api } from "@/lib/api";
 import {
   inferenceLabel,
@@ -24,6 +24,7 @@ import {
 import { clock, pct, signed } from "@/lib/format";
 import { isRemote, useTerminal } from "@/store/terminal";
 import { startTour } from "@/lib/tour";
+import { armStartupChime, playAlert } from "@/lib/feedback";
 import type { ConnectionMode, Course, DataOrigin } from "@/types";
 
 function Clock() {
@@ -214,6 +215,48 @@ const VELOCITY_TONE: Record<VelocityTier, string> = {
 const velocityTone = (velocity: number | null) =>
   velocity === null ? "text-ink-3" : VELOCITY_TONE[velocityTier(velocity)];
 
+export function academicStance(
+  margin: number | null,
+  velocity: number | null,
+  volatility: number,
+): "BULLISH ACCELERATION" | "DEFENSIVE BUFFER" | "VOLATILITY ALERT" {
+  if (volatilityRegime(volatility) === "high") return "VOLATILITY ALERT";
+  if (margin !== null && margin >= 0 && velocity !== null && velocity >= 100)
+    return "BULLISH ACCELERATION";
+  return "DEFENSIVE BUFFER";
+}
+
+function MarketStance({
+  margin,
+  velocity,
+  volatility,
+}: {
+  margin: number | null;
+  velocity: number | null;
+  volatility: number;
+}) {
+  const stance = academicStance(margin, velocity, volatility);
+  const previous = useRef(stance);
+  useEffect(() => {
+    if (previous.current !== stance && stance !== "BULLISH ACCELERATION")
+      playAlert();
+    previous.current = stance;
+  }, [stance]);
+  const tone = stance === "VOLATILITY ALERT" ? "text-down"
+    : stance === "BULLISH ACCELERATION" ? "text-up" : "text-accent";
+  return (
+    <div
+      role="status"
+      aria-atomic="true"
+      className={`flex shrink-0 items-center gap-2 border-r border-line bg-head px-2 ${tone}`}
+      title="Academic stance: volatility ≥200 triggers an alert; grade margin ≥0 and completion velocity ≥100% signal acceleration; otherwise protect the grade buffer. Updates with grades, task fills, time logs, and deadlines."
+    >
+      <span className="hidden text-ink-3 xl:inline">STANCE</span>
+      <span>{stance}</span>
+    </div>
+  );
+}
+
 function TapeItem({
   course,
   velocity,
@@ -261,7 +304,7 @@ function FocusVelocity() {
   const label = velocity === null ? "NO FILLS" : pct(velocity);
   return (
     <div
-      className="flex shrink-0 items-center gap-2 border-r border-line bg-head px-3"
+      className="hidden shrink-0 items-center gap-2 border-r border-line bg-head px-3 md:flex"
       title="Completion Velocity for the course in the execution deck: estimated ÷ actual minutes on finished tasks (unlogged finished tasks count as on budget)"
       aria-live="polite"
       aria-atomic
@@ -277,13 +320,16 @@ function FocusVelocity() {
 function Tape() {
   const data = useTerminal((s) => s.data);
   const minute = useNow(60_000);
+  const metrics = useMemo(() => data ? {
+    book: portfolio(data.courses),
+    velocity: completionVelocity(data.assignments),
+    volatility: assignmentVolatility(deadlineLoad(data.assignments, minute)),
+  } : null, [data, minute]);
   const items = useMemo(() => {
-    if (!data) return null;
+    if (!data || !metrics) return null;
     const { courses, assignments } = data;
-    const book = portfolio(courses);
-    const velocity = completionVelocity(assignments);
+    const { book, velocity, volatility } = metrics;
     const byCourse = velocityByCourse(assignments);
-    const volatility = assignmentVolatility(deadlineLoad(assignments, minute));
     return (
       <>
         <span className="flex items-center gap-2 px-5">
@@ -321,11 +367,14 @@ function Tape() {
         </span>
       </>
     );
-  }, [data, minute]);
+  }, [data, metrics]);
 
   const count = (data?.courses.length ?? 0) + 4;
   return (
     <div className="flex h-6 border-b border-line bg-canvas text-[11px] whitespace-nowrap">
+      {metrics && (
+        <MarketStance margin={metrics.book.margin} velocity={metrics.velocity} volatility={metrics.volatility} />
+      )}
       <FocusVelocity />
       <div
         className="tape-window relative flex min-w-0 flex-1 items-center overflow-hidden"
@@ -357,6 +406,7 @@ function useModifierLabel() {
 }
 
 export function TopBar() {
+  useEffect(() => armStartupChime(), []);
   const syncing = useTerminal((s) => s.syncing);
   const armed = useTerminal((s) => s.credentials !== null);
   const sync = useTerminal((s) => s.sync);

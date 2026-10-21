@@ -106,6 +106,41 @@ function scheduleTone(ctx: AudioContext, options: ToneOptions): void {
   };
 }
 
+/** Soft ascending terminal boot chord, played only after audio is enabled. */
+export function playStartup(): void {
+  if (!soundEnabled()) return;
+  const ctx = getContext();
+  if (!ctx) return;
+
+  for (const [index, frequency] of [392, 523.25, 783.99].entries()) {
+    scheduleTone(ctx, {
+      type: "sine",
+      startFreq: frequency,
+      endFreq: frequency,
+      start: index * 0.09,
+      duration: 0.26,
+      volume: 0.035,
+    });
+  }
+}
+
+/** Wait for an enabled user gesture; never queue blocked autoplay on page load. */
+export function armStartupChime(): () => void {
+  if (typeof window === "undefined") return () => {};
+  const cleanup = () => {
+    window.removeEventListener("click", onGesture);
+    window.removeEventListener("keyup", onGesture);
+  };
+  const onGesture = () => {
+    if (!soundEnabled()) return;
+    cleanup();
+    playStartup();
+  };
+  window.addEventListener("click", onGesture);
+  window.addEventListener("keyup", onGesture);
+  return cleanup;
+}
+
 /** Subtle low-volume micro-click for checkbox toggles. */
 export function playTick(): void {
   if (!soundEnabled()) return;
@@ -147,7 +182,7 @@ export function playFill(): void {
   });
 }
 
-/** Warning double-blip for high risk tiers. */
+/** Descending warning double-blip for a new defensive or volatile stance. */
 export function playAlert(): void {
   if (!soundEnabled()) return;
   const ctx = getContext();
@@ -155,8 +190,8 @@ export function playAlert(): void {
 
   for (const start of [0, 0.14]) {
     scheduleTone(ctx, {
-      type: "square",
-      startFreq: 440,
+      type: "triangle",
+      startFreq: 523.25,
       endFreq: 330,
       start,
       duration: 0.11,

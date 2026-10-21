@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useEscape, useRestoreFocus } from "@/components/ui";
 import { rankQueue } from "@/lib/engine";
 import { startTour } from "@/lib/tour";
+import { exportPortfolio } from "@/lib/portfolioExport";
 import { activeCourseOf, isRemote, useTerminal } from "@/store/terminal";
 
 interface Command {
@@ -83,7 +84,7 @@ function PaletteDialog({
       {
         id: "sound",
         label: store.soundOn ? "MUTE TERMINAL AUDIO" : "ENABLE TERMINAL AUDIO",
-        hint: "Web Audio synthesized clicks & fills",
+        hint: "Synthesized startup chime, clicks, fills & warnings",
         shortcut: "M",
         run: () => store.toggleSound(),
       },
@@ -118,6 +119,15 @@ function PaletteDialog({
         run: () => void store.toggleSimulation(),
       },
     ];
+    if (data) {
+      actions.push({
+        id: "export-portfolio",
+        label: "EXPORT PORTFOLIO (CSV)",
+        hint: "Download all courses, grades, assignments, and task time logs",
+        shortcut: "CSV",
+        run: () => exportPortfolio(data),
+      });
+    }
     if (course) {
       actions.push({
         id: "study-triage",
