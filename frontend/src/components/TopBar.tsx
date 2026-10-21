@@ -13,6 +13,7 @@ import {
   SyllabusIngestModal,
   useSyllabusIngest,
 } from "@/components/SyllabusIngestModal";
+import { MonteCarloModal, useMonteCarlo } from "@/components/MonteCarloModal";
 import { useNow } from "@/hooks/useNow";
 import {
   assignmentVolatility,
@@ -426,6 +427,7 @@ export function TopBar() {
   const setTokenOpen = useTerminal((s) => s.setTokenOpen);
   const setPaletteOpen = useTerminal((s) => s.setPaletteOpen);
   const setSyllabusOpen = useSyllabusIngest((s) => s.setOpen);
+  const setMonteCarloOpen = useMonteCarlo((s) => s.setOpen);
   const modifier = useModifierLabel();
 
   return (
@@ -481,6 +483,14 @@ export function TopBar() {
             + SYLLABUS
           </Key>
           <Key
+            caps={false}
+            onClick={() => setMonteCarloOpen(true)}
+            title="Monte Carlo what-if desk: final-grade quantiles, 90% value at risk, leverage ranking, and score shocks"
+            aria-label="Open the Monte Carlo what-if and value-at-risk desk"
+          >
+            WHAT-IF // VaR
+          </Key>
+          <Key
             onClick={() => setTokenOpen(true)}
             aria-label="Configure Canvas API token"
           >
@@ -497,6 +507,7 @@ export function TopBar() {
       </div>
       <Tape />
       <SyllabusIngestModal />
+      <MonteCarloModal />
     </header>
   );
 }

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useEscape, useRestoreFocus } from "@/components/ui";
 import { useSyllabusIngest } from "@/components/SyllabusIngestModal";
+import { useMonteCarlo } from "@/components/MonteCarloModal";
 import { rankQueue } from "@/lib/engine";
 import { startTour } from "@/lib/tour";
 import { exportPortfolio } from "@/lib/portfolioExport";
@@ -163,6 +164,13 @@ function PaletteDialog({
         run: () => store.setScenarioScore(selected.id, 100),
       });
     }
+    actions.push({
+      id: "monte-carlo",
+      label: "WHAT-IF // VaR: MONTE CARLO DESK",
+      hint: "Grade quantiles, 90% VaR, leverage ranking & score shocks",
+      shortcut: "VAR",
+      run: () => useMonteCarlo.getState().setOpen(true),
+    });
     actions.push({
       id: "reset-scenario",
       label: "WHAT-IF: RESET SIMULATION SCORES",

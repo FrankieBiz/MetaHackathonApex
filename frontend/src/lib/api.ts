@@ -4,6 +4,11 @@
 import { z } from "zod";
 import { createMockState } from "@/lib/mockData";
 import {
+  simulateLocally,
+  type MonteCarloRequest,
+  type MonteCarloResponse,
+} from "@/lib/monteCarlo";
+import {
   LOCAL_SYLLABUS_PRESETS,
   presetState,
   type SyllabusPreset,
@@ -648,6 +653,81 @@ export async function loadSyllabusPreset(id: string): Promise<PresetLoad> {
   }
 }
 
+// ---------------------------------------------------- monte carlo desk
+
+/** Shock sliders re-run on every move; a slower backend loses to the local engine. */
+const MONTE_CARLO_DEADLINE_MS = 2500;
+
+const finite = z.number().finite();
+
+const MonteCarloBody = z.object({
+  iterations: z.number().int().positive(),
+  courses: z.array(
+    z.object({
+      course_id: id,
+      target_score: finite,
+      percentiles: z
+        .object({ p10: finite, p25: finite, p50: finite, p75: finite, p90: finite })
+        .nullable(),
+      var_90: finite.min(0).nullable(),
+      probability_of_target: finite.min(0).max(1).nullable(),
+      sensitivity_matrix: z.array(
+        z.object({ assignment_id: id, weight: finite, marginal_impact: finite }),
+      ),
+    }),
+  ),
+});
+
+/**
+ * A what-if simulation. Like a feed read it never rejects: an offline desk,
+ * or a slow, failing, or malformed backend answer, is run by the local engine
+ * over `state` instead, flagged `local` with the cause attached.
+ */
+export type MonteCarloRun =
+  | { source: "backend"; response: MonteCarloResponse }
+  | { source: "local"; response: MonteCarloResponse; cause: ApiError };
+
+export async function simulateMonteCarlo(
+  body: MonteCarloRequest,
+  state: Pick<TerminalState, "courses" | "assignments">,
+  { offline = false }: { offline?: boolean } = {},
+): Promise<MonteCarloRun> {
+  const local = (cause: ApiError): MonteCarloRun => ({
+    source: "local",
+    response: simulateLocally(body, state),
+    cause,
+  });
+  // The pinned or detached desk never contacts the backend.
+  if (offline) {
+    return local(new ApiError("Simulation desk is offline", "network"));
+  }
+  try {
+    const response = MonteCarloBody.parse(
+      await request(
+        "/api/v1/simulate/monte-carlo",
+        { method: "POST", body: JSON.stringify(body) },
+        MONTE_CARLO_DEADLINE_MS,
+      ),
+    );
+    if (
+      body.course_id !== undefined &&
+      !response.courses.some((c) => c.course_id === body.course_id)
+    ) {
+      throw new ApiError("Simulation returned a different course", "parse");
+    }
+    return { source: "backend", response };
+  } catch (error) {
+    return local(
+      error instanceof ApiError
+        ? error
+        : new ApiError(
+            "/api/v1/simulate/monte-carlo sent a malformed run",
+            "parse",
+          ),
+    );
+  }
+}
+
 export const api = {
   state: () => intercept(readState),
 
@@ -756,6 +836,8 @@ export const api = {
 
   syllabusPresets: getSyllabusPresets,
   loadSyllabusPreset,
+
+  simulateMonteCarlo,
 
   patchSubtask: (
     subtaskId: string,
