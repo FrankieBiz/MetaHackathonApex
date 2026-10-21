@@ -9,6 +9,10 @@ import {
   type InferencePill,
 } from "@/store/inference";
 import { Key, Spinner } from "@/components/ui";
+import {
+  SyllabusIngestModal,
+  useSyllabusIngest,
+} from "@/components/SyllabusIngestModal";
 import { useNow } from "@/hooks/useNow";
 import {
   assignmentVolatility,
@@ -421,6 +425,7 @@ export function TopBar() {
   const toggleSound = useTerminal((s) => s.toggleSound);
   const setTokenOpen = useTerminal((s) => s.setTokenOpen);
   const setPaletteOpen = useTerminal((s) => s.setPaletteOpen);
+  const setSyllabusOpen = useSyllabusIngest((s) => s.setOpen);
   const modifier = useModifierLabel();
 
   return (
@@ -468,6 +473,14 @@ export function TopBar() {
             )}
           </Key>
           <Key
+            tone="up"
+            onClick={() => setSyllabusOpen(true)}
+            title="Drop a syllabus photo or document, or paste its text, to load courses without a Canvas token"
+            aria-label="Ingest a syllabus"
+          >
+            + SYLLABUS
+          </Key>
+          <Key
             onClick={() => setTokenOpen(true)}
             aria-label="Configure Canvas API token"
           >
@@ -483,6 +496,7 @@ export function TopBar() {
         </div>
       </div>
       <Tape />
+      <SyllabusIngestModal />
     </header>
   );
 }

@@ -129,6 +129,33 @@ function fakeBackend() {
         ...(backend.trace ? { agent_reasoning_trace: BACKEND_TRACE } : {}),
       });
     }
+    if (method === "POST" && pathname === "/api/v1/syllabus/ingest") {
+      // Like the backend: the extracted course joins the book and the full state comes back.
+      backend.state.courses.push({
+        id: "syllabus:bio-2200",
+        course_code: "BIO 2200",
+        name: "Cell Biology",
+        current_score: null,
+        target_score: 90,
+        portfolio_margin: null,
+        grade_history: [],
+      });
+      backend.state.assignments.push({
+        id: "syllabus:bio-2200:midterm",
+        course_id: "syllabus:bio-2200",
+        course_code: "BIO 2200",
+        title: "Midterm Exam",
+        due_at: new Date(Date.now() + 9 * 86_400_000).toISOString(),
+        points_possible: 100,
+        weight: 30,
+        description: null,
+        status: "pending",
+        graded: false,
+        priority_score: 0,
+        subtasks: [],
+      });
+      return reply(backend.state);
+    }
     return reply({ detail: "Not Found" }, 404);
   };
   return { backend, fetch };
@@ -584,5 +611,79 @@ describe("isolated simulation desk", () => {
     await store.getState().toggleSimulation();
     expect(store.getState().simulationPinned).toBe(false);
     expectDesk(store.getState());
+  });
+});
+
+describe("syllabus ingest", () => {
+  const SYLLABUS = "BIO 2200 Cell Biology. Grading: Midterm 30%, Final 40%.";
+
+  beforeEach(() => {
+    vi.stubGlobal("window", {
+      localStorage: memoryStorage(),
+      sessionStorage: memoryStorage(),
+    });
+  });
+
+  async function ingest(store: Awaited<ReturnType<typeof loadStore>>) {
+    const { api } = await import("@/lib/api");
+    await store
+      .getState()
+      .hydrateFromSyllabus(await api.ingestSyllabus({ text: SYLLABUS }));
+  }
+
+  it("hydrates the book and focuses the extracted course", async () => {
+    const store = await loadStore();
+    await store.getState().boot();
+    await ingest(store);
+
+    const state = store.getState();
+    expect(fake.backend.calls).toContain("POST /api/v1/syllabus/ingest");
+    expect(state.data!.courses.map((c) => c.course_code)).toContain(
+      "BIO 2200",
+    );
+    expect(state.activeCourseId).toBe("syllabus:bio-2200");
+    expect(state.selectedId).toBe("syllabus:bio-2200:midterm");
+    expect(state.origin).toBe("backend");
+    expect(state.events[0]).toMatchObject({ level: "ok" });
+    expect(state.events[0].text).toMatch(/SYLLABUS INGESTED · BIO 2200 added/);
+  });
+
+  it("leaves a pinned desk for the backend's answer", async () => {
+    const store = await loadStore();
+    await store.getState().boot();
+    await store.getState().toggleSimulation();
+    expect(store.getState().origin).toBe("sandbox");
+
+    await ingest(store);
+    const state = store.getState();
+    expect(state.simulationPinned).toBe(false);
+    expect(state.origin).toBe("backend");
+    expect(state.mode).toBe("backend-demo");
+    expect(state.activeCourseId).toBe("syllabus:bio-2200");
+  });
+
+  it("relinks a sandbox session once the backend is back", async () => {
+    fake.backend.down = true;
+    const store = await loadStore();
+    await store.getState().boot();
+    expect(store.getState().mode).toBe("offline");
+
+    fake.backend.down = false;
+    await ingest(store);
+    const state = store.getState();
+    expect(state.origin).toBe("backend");
+    expect(state.mode).toBe("backend-demo");
+    expect(state.data!.assignments).toHaveLength(13);
+  });
+
+  it("changes nothing when extraction fails", async () => {
+    fake.backend.down = true;
+    const store = await loadStore();
+    await store.getState().boot();
+    const before = store.getState().data;
+
+    await expect(ingest(store)).rejects.toMatchObject({ kind: "network" });
+    expect(store.getState().data).toBe(before);
+    expect(store.getState().origin).toBe("sandbox");
   });
 });

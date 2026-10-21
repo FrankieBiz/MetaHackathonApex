@@ -20,6 +20,8 @@ def settings(**overrides) -> Settings:
         llm_base_url="http://localhost:11434/v1",
         llm_api_key="ollama",
         llm_model="llama3",
+        meta_api_key="",
+        auditor_api_key="",
     )
     values.update(overrides)
     return Settings(**values)

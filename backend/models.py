@@ -1,13 +1,17 @@
 """Strict domain models shared by Canvas, the planner, storage, and HTTP routes."""
 
+import base64
+import binascii
 from typing import Annotated, Literal
 
 from pydantic import (
+    AliasChoices,
     AwareDatetime,
     BaseModel,
     ConfigDict,
     Field,
     computed_field,
+    field_validator,
     model_validator,
 )
 
@@ -33,6 +37,17 @@ class SubTaskNode(StrictModel):
     children: list["SubTaskNode"] = Field(default_factory=list)
 
 
+class CategoryWeight(StrictModel):
+    name: Annotated[str, Field(min_length=1, max_length=500, pattern=r"\S")]
+    weight: Annotated[float, Field(ge=0, le=100)]
+
+
+class RubricCriterion(StrictModel):
+    name: Annotated[str, Field(min_length=1, max_length=500, pattern=r"\S")]
+    description: Annotated[str, Field(max_length=2000)] = ""
+    points: Annotated[float, Field(ge=0)] | None = None
+
+
 class AssignmentModel(StrictModel):
     id: Identifier
     course_id: Identifier
@@ -49,6 +64,8 @@ class AssignmentModel(StrictModel):
     score: Annotated[float, Field(ge=0)] | None = None
     priority_score: Annotated[float, Field(ge=0, le=100)] = 0.0
     subtasks: list[SubTaskNode] = Field(default_factory=list)
+    category: Title | None = None
+    rubric_criteria: list[RubricCriterion] = Field(default_factory=list)
 
 
 class GradePoint(StrictModel):
@@ -65,6 +82,8 @@ class CourseModel(StrictModel):
     syllabus: Annotated[str, Field(max_length=100_000)] = ""
     # Canvas has no grade history; only the simulation fixtures supply one.
     grade_history: list[GradePoint] = Field(default_factory=list)
+    category_weights: list[CategoryWeight] = Field(default_factory=list)
+    syllabus_ingested: bool = False
 
     @computed_field
     @property
@@ -98,6 +117,146 @@ class TerminalState(StrictModel):
     upcoming_events: list[UpcomingEvent]
     metrics: TerminalMetrics
     persistence_status: Literal["disabled", "connected", "unavailable"] = "disabled"
+
+
+_MAX_UPLOAD_BYTES = 6 * 1024 * 1024
+_MAX_UPLOAD_BASE64 = 4 * ((_MAX_UPLOAD_BYTES + 2) // 3) + 100
+SyllabusMime = Literal[
+    "image/png", "image/jpeg", "image/webp", "image/gif", "application/pdf", "text/plain"
+]
+
+
+def _syllabus_data(value: str, mime_type: str | None = None) -> tuple[str, bytes]:
+    """Validate inline bytes without fetching URLs or retaining uploads in state."""
+    if value.startswith("data:"):
+        header, separator, value = value.partition(",")
+        if not separator or not header.endswith(";base64"):
+            raise ValueError("Provide base64 file data")
+        declared = header[5:-7]
+        if mime_type is not None and declared != mime_type:
+            raise ValueError("File MIME type does not match its data URL")
+        mime_type = declared
+    try:
+        data = base64.b64decode(value, validate=True)
+    except (ValueError, binascii.Error):
+        raise ValueError("Provide valid base64 file data") from None
+    if not data or len(data) > _MAX_UPLOAD_BYTES:
+        raise ValueError("Syllabus files must contain 1 byte to 6 MiB")
+    detected = None
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        detected = "image/png"
+    elif data.startswith(b"\xff\xd8\xff"):
+        detected = "image/jpeg"
+    elif data.startswith((b"GIF87a", b"GIF89a")):
+        detected = "image/gif"
+    elif data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        detected = "image/webp"
+    elif data.startswith(b"%PDF-"):
+        detected = "application/pdf"
+    if mime_type == "text/plain":
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            raise ValueError("Text syllabi must use UTF-8") from None
+        if not text.strip() or len(text) > 100_000:
+            raise ValueError("Text syllabi must contain 1 to 100000 characters")
+    elif detected is None or (mime_type is not None and mime_type != detected):
+        raise ValueError("Provide a PNG, JPEG, GIF, WebP, PDF, or UTF-8 text syllabus")
+    return mime_type or detected, data
+
+
+class SyllabusFile(StrictModel):
+    name: Annotated[str, Field(min_length=1, max_length=200, pattern=r"\S")]
+    mime_type: SyllabusMime
+    data_base64: Annotated[str, Field(min_length=1, max_length=_MAX_UPLOAD_BASE64)]
+
+    @model_validator(mode="after")
+    def validate_file(self) -> "SyllabusFile":
+        _syllabus_data(self.data_base64, self.mime_type)
+        return self
+
+
+class SyllabusIngestRequest(StrictModel):
+    raw_text: Annotated[str, Field(min_length=1, max_length=100_000, pattern=r"\S")] | None = Field(
+        default=None, validation_alias=AliasChoices("raw_text", "syllabus_text")
+    )
+    image_base64: Annotated[str, Field(min_length=1, max_length=_MAX_UPLOAD_BASE64)] | None = None
+    file: SyllabusFile | None = None
+
+    @field_validator("image_base64")
+    @classmethod
+    def validate_image(cls, value: str | None) -> str | None:
+        if value is not None:
+            mime_type, data = _syllabus_data(value)
+            if not mime_type.startswith("image/"):
+                raise ValueError("image_base64 must contain an image")
+            return f"data:{mime_type};base64,{base64.b64encode(data).decode('ascii')}"
+        return value
+
+    @model_validator(mode="after")
+    def require_material(self) -> "SyllabusIngestRequest":
+        if self.raw_text is None and self.image_base64 is None and self.file is None:
+            raise ValueError("Provide syllabus_text, raw_text, image_base64, or file")
+        return self
+
+
+class SyllabusCourse(StrictModel):
+    course_code: Annotated[str, Field(min_length=1, max_length=500, pattern=r"\S")]
+    name: Annotated[str, Field(min_length=1, max_length=500, pattern=r"\S")]
+    category_weights: Annotated[list[CategoryWeight], Field(max_length=50)] = Field(
+        default_factory=list
+    )
+
+    @model_validator(mode="after")
+    def validate_weights(self) -> "SyllabusCourse":
+        names = [category.name.strip().casefold() for category in self.category_weights]
+        if len(set(names)) != len(names) or sum(c.weight for c in self.category_weights) > 100.01:
+            raise ValueError("Category weights must be unique and total at most 100 percent")
+        return self
+
+
+class SyllabusDeliverable(StrictModel):
+    title: Annotated[str, Field(min_length=1, max_length=500, pattern=r"\S")]
+    description: Annotated[str, Field(max_length=20_000)] = ""
+    category: Annotated[str, Field(min_length=1, max_length=500, pattern=r"\S")] | None = None
+    due_at: AwareDatetime | None = None
+    points_possible: Annotated[float, Field(ge=0)] = 0.0
+    weight: Annotated[float, Field(ge=0, le=100)] = 0.0
+    rubric_criteria: Annotated[list[RubricCriterion], Field(max_length=50)] = Field(
+        default_factory=list
+    )
+
+    @property
+    def assignment_description(self) -> str:
+        if not self.rubric_criteria:
+            return self.description
+        criteria = [
+            criterion.name
+            + (f" ({criterion.points:g} points)" if criterion.points is not None else "")
+            + f": {criterion.description}"
+            for criterion in self.rubric_criteria
+        ]
+        return self.description + "\n\nRubric:\n" + "\n".join(criteria)
+
+    @model_validator(mode="after")
+    def bounded_description(self) -> "SyllabusDeliverable":
+        if len(self.assignment_description) > 100_000:
+            raise ValueError("Assignment and rubric exceed the description limit")
+        return self
+
+
+class SyllabusExtraction(StrictModel):
+    course: SyllabusCourse
+    deliverables: Annotated[list[SyllabusDeliverable], Field(max_length=200)]
+
+    @model_validator(mode="after")
+    def unique_deliverables(self) -> "SyllabusExtraction":
+        keys = [
+            (" ".join(item.title.split()).casefold(), item.due_at) for item in self.deliverables
+        ]
+        if len(set(keys)) != len(keys):
+            raise ValueError("Duplicate syllabus deliverables")
+        return self
 
 
 class SubTaskUpdate(StrictModel):

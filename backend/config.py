@@ -4,12 +4,12 @@ from functools import lru_cache
 from typing import Annotated
 from urllib.parse import urlsplit
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=None, extra="ignore")
+    model_config = SettingsConfigDict(env_file=None, extra="ignore", populate_by_name=True)
 
     canvas_api_url: str = "https://canvas.instructure.com"
     canvas_api_token: SecretStr = SecretStr("")
@@ -22,9 +22,16 @@ class Settings(BaseSettings):
     meta_base_url: str = "https://api.meta.ai/v1"
     meta_model: str = "muse-spark-1.3"
     # Optional fast pre-filter that audits rubric constraints before the primary plan.
-    auditor_api_key: SecretStr = SecretStr("")
-    auditor_base_url: str = "https://api.deepseek.com/v1"
-    auditor_model: str = "deepseek-flash"
+    auditor_api_key: SecretStr = Field(
+        default=SecretStr(""), validation_alias=AliasChoices("AUDITOR_API_KEY", "DEEPSEEK_API_KEY")
+    )
+    auditor_base_url: str = Field(
+        default="https://api.deepseek.com/v1",
+        validation_alias=AliasChoices("AUDITOR_BASE_URL", "DEEPSEEK_BASE_URL"),
+    )
+    auditor_model: str = Field(
+        default="deepseek-flash", validation_alias=AliasChoices("AUDITOR_MODEL", "DEEPSEEK_MODEL")
+    )
     auditor_timeout_seconds: float = Field(default=6, gt=0, le=60)
     demo_mode: bool | None = None
     llm_timeout_seconds: float = Field(default=15, gt=0, le=120)

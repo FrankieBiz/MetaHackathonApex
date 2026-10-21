@@ -3,10 +3,13 @@
 import asyncio
 from datetime import UTC, datetime
 from statistics import pstdev
+from uuid import NAMESPACE_URL, uuid5
 
 from openai import AsyncOpenAI
 
 from .ai_engine import (
+    extract_syllabus,
+    fallback_tree,
     generate_study_recommendation,
     run_triage_agent,
     saved_plan_trace,
@@ -18,12 +21,15 @@ from .config import Settings
 from .models import (
     AgentReasoningStep,
     AssignmentModel,
+    CourseModel,
     InferenceTelemetry,
     StudyInsertRequest,
     SubTaskNode,
     SubTaskUpdate,
+    SyllabusIngestRequest,
     TerminalMetrics,
     TerminalState,
+    _syllabus_data,
 )
 from .persistence import RestoreUnavailable, SupabaseStore
 from .tasks import find, patch_tree, set_completed, walk
@@ -86,6 +92,9 @@ class TerminalService:
                         restored = {a.id: a for a in previous.assignments}
                         restored.update(local_assignments)
                         previous.assignments = list(restored.values())
+                        restored_courses = {c.id: c for c in previous.courses}
+                        restored_courses.update({c.id: c for c in local.courses if c.id in dirty})
+                        previous.courses = list(restored_courses.values())
                         restored_nodes = {n.id: n for n in previous.study_recommendations}
                         restored_nodes.update(
                             {n.id: n for n in local.study_recommendations if n.id in dirty}
@@ -103,7 +112,28 @@ class TerminalService:
         old_courses = {c.id: c for c in previous.courses} if previous else {}
         for course in snapshot.courses:
             if course.id in old_courses:
-                course.target_score = old_courses[course.id].target_score
+                old = old_courses[course.id]
+                course.target_score = old.target_score
+                if old.syllabus_ingested:
+                    course.syllabus = old.syllabus
+                    course.category_weights = old.model_copy(deep=True).category_weights
+                    course.syllabus_ingested = True
+        # Canvas only owns its own records; syllabus imports survive TTL/forced refreshes.
+        course_ids = {c.id for c in snapshot.courses}
+        snapshot.courses.extend(
+            c.model_copy(deep=True)
+            for c in old_courses.values()
+            if c.id.startswith("syllabus:") and c.id not in course_ids
+        )
+        course_ids = {c.id for c in snapshot.courses}
+        assignment_ids = {a.id for a in snapshot.assignments}
+        snapshot.assignments.extend(
+            a.model_copy(deep=True)
+            for a in old_assignments.values()
+            if a.id.startswith("syllabus:")
+            and a.id not in assignment_ids
+            and a.course_id in course_ids
+        )
         for assignment in snapshot.assignments:
             old = old_assignments.get(assignment.id)
             if old:
@@ -288,6 +318,85 @@ class TerminalService:
                 )
                 existing.add(identifier)
                 self._dirty[self._state.metrics.demo_mode].add(identifier)
+            self._recalculate(self._state)
+            await self._persist()
+            return self._state.model_copy(deep=True)
+
+    async def ingest_syllabus(self, request: SyllabusIngestRequest) -> TerminalState:
+        async with self._lock:
+            await self._sync()
+            assert self._state is not None
+            source = self._state.metrics.demo_mode
+        extracted = await extract_syllabus(
+            request, settings=self.settings, client=self.llm, auditor=self.auditor
+        )
+        async with self._lock:
+            await self._sync()
+            assert self._state is not None
+            if self._state.metrics.demo_mode != source:
+                raise RuntimeError("Workspace changed during ingestion; retry with current state")
+            code = " ".join(extracted.course.course_code.split())
+            course = next(
+                (c for c in self._state.courses if c.course_code.casefold() == code.casefold()),
+                None,
+            )
+            if course is None:
+                course = CourseModel(
+                    id=f"syllabus:{uuid5(NAMESPACE_URL, f'apex:course:{code.casefold()}')}",
+                    course_code=code,
+                    name=extracted.course.name.strip(),
+                )
+                self._state.courses.append(course)
+            course.category_weights = extracted.course.category_weights
+            course.syllabus_ingested = True
+            # Keep readable text for study recommendations; never store the uploaded base64.
+            syllabus = request.raw_text or ""
+            if request.file and request.file.mime_type == "text/plain":
+                _, data = _syllabus_data(request.file.data_base64, "text/plain")
+                syllabus = (syllabus + "\n" + data.decode("utf-8")).strip()[:100_000]
+            if not syllabus:
+                syllabus = "\n".join(
+                    [
+                        f"{course.course_code}: {course.name}",
+                        *(f"{c.name}: {c.weight:g}%" for c in course.category_weights),
+                        *(f"{a.title}: {a.description}" for a in extracted.deliverables),
+                    ]
+                )[:100_000]
+            course.syllabus = syllabus
+            self._dirty[source].add(course.id)
+            existing = {assignment.id: assignment for assignment in self._state.assignments}
+            for item in extracted.deliverables:
+                title = " ".join(item.title.split())
+                due = item.due_at.astimezone(UTC).isoformat() if item.due_at else "undated"
+                identifier = f"syllabus:{task_id(course.id, f'{title.casefold()}:{due}')}"
+                # Replays and reuploads preserve completion, grades, and logged time.
+                if identifier in existing:
+                    continue
+                assignment = AssignmentModel(
+                    id=identifier,
+                    course_id=course.id,
+                    course_code=course.course_code,
+                    title=title,
+                    due_at=item.due_at,
+                    points_possible=item.points_possible,
+                    weight=item.weight,
+                    category=item.category,
+                    rubric_criteria=item.rubric_criteria,
+                    description=item.assignment_description,
+                )
+                assignment.subtasks = fallback_tree(assignment)
+                self._state.assignments.append(assignment)
+                existing[identifier] = assignment
+                self._dirty[source].add(identifier)
+            if any(
+                a.course_id == course.id and a.status != "completed"
+                for a in self._state.assignments
+            ):
+                self._state.study_recommendations = [
+                    n
+                    for n in self._state.study_recommendations
+                    if n.id != task_id(course.id, "rapid-study")
+                ]
             self._recalculate(self._state)
             await self._persist()
             return self._state.model_copy(deep=True)

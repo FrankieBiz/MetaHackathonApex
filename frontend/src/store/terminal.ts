@@ -124,6 +124,8 @@ interface TerminalStore {
   toggleSimulation: () => Promise<void>;
   setPaletteOpen: (open: boolean) => void;
   setTokenOpen: (open: boolean) => void;
+  /** Puts the backend's post-ingest state on screen and focuses the extracted course. */
+  hydrateFromSyllabus: (state: TerminalState) => Promise<void>;
 }
 
 const isRemote = (mode: ConnectionMode) =>
@@ -972,6 +974,35 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
 
     setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
     setTokenOpen: (tokenOpen) => set({ tokenOpen }),
+
+    hydrateFromSyllabus: async (state) => {
+      const known = new Set(get().data?.courses.map((c) => c.id));
+      // The backend just answered, so a pinned desk would only hide the new course.
+      if (get().simulationPinned) {
+        writePin(false);
+        set({ simulationPinned: false });
+      }
+      try {
+        if (isRemote(get().mode)) adopt(state);
+        else await reconnect(state);
+      } catch (error) {
+        // Only reconnect's replay can throw here.
+        goOffline(message(error));
+        return;
+      }
+      const { data } = get();
+      const added = data?.courses.filter((c) => !known.has(c.id)) ?? [];
+      if (added[0]) get().selectCourse(added[0].id);
+      playFill();
+      log(
+        "ok",
+        `SYS // SYLLABUS INGESTED · ${
+          added.length
+            ? `${added.map((c) => c.course_code).join(", ")} added`
+            : "existing courses updated"
+        } · ${data?.courses.length ?? 0} courses, ${data?.assignments.length ?? 0} assignments on the book.`,
+      );
+    },
   };
 });
 

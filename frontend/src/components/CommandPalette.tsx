@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useEscape, useRestoreFocus } from "@/components/ui";
+import { useSyllabusIngest } from "@/components/SyllabusIngestModal";
 import { rankQueue } from "@/lib/engine";
 import { startTour } from "@/lib/tour";
 import { exportPortfolio } from "@/lib/portfolioExport";
@@ -94,6 +95,13 @@ function PaletteDialog({
         hint: "POST /api/sync",
         shortcut: "SYNC",
         run: () => void store.sync(),
+      },
+      {
+        id: "syllabus",
+        label: "+ SYLLABUS",
+        hint: "Ingest a syllabus photo, document, or pasted text",
+        shortcut: "INGEST",
+        run: () => useSyllabusIngest.getState().setOpen(true),
       },
       {
         id: "token",

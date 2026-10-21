@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from openai import AsyncOpenAI
 from pydantic import AliasChoices, Field, SecretStr, field_validator
 
-from .ai_engine import generate_study_triage
+from .ai_engine import SyllabusExtractionUnavailable, generate_study_triage
 from .canvas_client import CanvasClient
 from .config import Settings, get_settings
 from .models import (
@@ -24,6 +24,7 @@ from .models import (
     StudyTriageRequest,
     SubTaskNode,
     SubTaskUpdate,
+    SyllabusIngestRequest,
     TerminalState,
 )
 from .persistence import SupabaseStore
@@ -120,6 +121,8 @@ def create_app(
 
     @app.exception_handler(RequestValidationError)
     async def invalid_input(request: Request, exc: RequestValidationError) -> JSONResponse:
+        if request.url.path in ("/api/v1/syllabus/ingest", "/api/v1/ingest/syllabus"):
+            return JSONResponse(status_code=422, content={"detail": "Invalid syllabus input."})
         if request.url.path in ("/api/sync", "/api/canvas/sync"):
             # FastAPI's default validation detail includes the rejected input.
             return JSONResponse(status_code=422, content={"detail": "Invalid Canvas sync body."})
@@ -197,6 +200,16 @@ def create_app(
         return await generate_study_triage(
             body, settings=config, client=request.app.state.terminal.llm
         )
+
+    @app.post("/api/v1/syllabus/ingest", response_model=TerminalState)
+    @app.post("/api/v1/ingest/syllabus", response_model=TerminalState)
+    async def ingest_syllabus(body: SyllabusIngestRequest, request: Request) -> TerminalState:
+        try:
+            return await request.app.state.terminal.ingest_syllabus(body)
+        except SyllabusExtractionUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.post("/api/v1/triage/study/insert", response_model=TerminalState)
     async def insert_study(body: StudyInsertRequest, request: Request) -> TerminalState:

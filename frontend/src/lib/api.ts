@@ -353,6 +353,18 @@ const StudyPlan = z.object({
   source: z.enum(["ai", "local"]),
 });
 
+/** A dropped syllabus image or document, base64-encoded for JSON transport. */
+export interface SyllabusFile {
+  name: string;
+  mime_type: string;
+  data_base64: string;
+}
+
+export interface SyllabusIngestInput {
+  text?: string;
+  file?: SyllabusFile;
+}
+
 export const api = {
   state: () => intercept(readState),
 
@@ -454,6 +466,31 @@ export const api = {
       telemetry: result.telemetry,
       trace: result.agent_reasoning_trace ?? null,
     };
+  },
+
+  /** Extracts courses, weights, and deliverables from a syllabus; answers with the updated state. */
+  ingestSyllabus: async ({
+    text,
+    file,
+  }: SyllabusIngestInput): Promise<TerminalState> => {
+    const syllabusText = text?.trim();
+    if (!syllabusText && !file) {
+      throw new ApiError("Attach a syllabus file or paste its text", "parse");
+    }
+    // Images travel only as `file`: the backend attaches image_base64 as a second copy.
+    return normalizeState(
+      await request(
+        "/api/v1/syllabus/ingest",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            ...(syllabusText ? { syllabus_text: syllabusText } : {}),
+            ...(file ? { file } : {}),
+          }),
+        },
+        90_000,
+      ),
+    );
   },
 
   patchSubtask: (
