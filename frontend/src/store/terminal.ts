@@ -47,7 +47,11 @@ const SANDBOX_KEY = "apex-terminal:sandbox:v2";
 /** Session-scoped so a reload mid-demo stays on the desk, but a new tab starts live. */
 const PIN_KEY = "apex-terminal:simulation-pinned";
 const GRADES_KEY = "apex-terminal:grade-ledger:v1";
-const LOCAL_TRIAGE_MIN_MS = 1600;
+/** Footer headline while the local sandbox runs; the cause stays one line down in the log. */
+export const SANDBOX_READY =
+  "SYS // ISOLATED SANDBOX DESK ACTIVE · DETERMINISTIC ENGINE READY (CTRL+SHIFT+D TO TOGGLE LIVE API)";
+/** The execution deck streams its triage log this long before a tree mounts. */
+export const TRIAGE_STREAM_MS = 800;
 
 type Patch = { is_completed?: boolean; actual_minutes?: number };
 
@@ -444,6 +448,7 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
         "info",
         `${feed.cause.message}. Isolated simulation desk engaged${restored ? " with your saved session" : ""}.`,
       );
+      log("ok", SANDBOX_READY);
     },
 
     refresh: async () => {
@@ -500,7 +505,7 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
           if (isNetwork(cause)) {
             goOffline(cause.message);
             log(
-              "warn",
+              get().origin === "sandbox" ? "info" : "warn",
               `${cause.message}. Start the FastAPI backend on :8000, then sync again.`,
             );
           } else if (wasRemote) {
@@ -514,6 +519,7 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
               `Sync failed: ${cause.message}. Staying on the simulation desk.`,
             );
           }
+          if (get().origin === "sandbox") log("ok", SANDBOX_READY);
           return;
         }
         if (!wasRemote) {
@@ -736,16 +742,16 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
       if (!subtasks) {
         useInference.getState().finish(null, "local");
         subtasks = localTriage(assignment);
-        // Let the decomposition log play out; an instant swap reads as a glitch.
-        await wait(Math.max(0, LOCAL_TRIAGE_MIN_MS - (Date.now() - started)));
-        if (isRemote(get().mode)) {
-          log(
-            "info",
-            "Backend came online during triage. Run triage again to use Llama-3.",
-          );
-          done();
-          return;
-        }
+      }
+      // Let the decomposition log play out; an instant swap reads as a glitch.
+      await wait(Math.max(0, TRIAGE_STREAM_MS - (Date.now() - started)));
+      if (local && isRemote(get().mode)) {
+        log(
+          "info",
+          "Backend came online during triage. Run triage again to use Llama-3.",
+        );
+        done();
+        return;
       }
 
       const current = get().data;

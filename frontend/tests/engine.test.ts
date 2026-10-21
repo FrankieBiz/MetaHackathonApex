@@ -17,9 +17,13 @@ import {
   priorityTier,
   rankQueue,
   rollup,
+  rubricBreakdown,
   setCompletion,
   studyRecommendation,
+  temporalByCourse,
   updateSubtasks,
+  velocityFills,
+  velocityTier,
   volatilityRegime,
 } from "@/lib/engine";
 import { createMockState } from "@/lib/mockData";
@@ -165,14 +169,52 @@ describe("metrics", () => {
     expect(completionVelocity(assignments)).toBeCloseTo((325 / 360) * 100);
   });
 
-  it("ignores completed leaves with no logged time and returns null with no fills", () => {
-    const unlogged = [
+  it("books completed leaves with no logged time at their estimate", () => {
+    const { courses, assignments } = createMockState(NOW);
+    // A finished 4h tree where only one 30m leaf had time logged: 2h 45m.
+    const worked = [
       {
-        ...createMockState(NOW).assignments[0],
-        subtasks: [node("x", [], { is_completed: true })],
+        ...assignments[0],
+        subtasks: [
+          node("overrun", [], {
+            is_completed: true,
+            actual_minutes: 165,
+          }),
+          node("rest", [], { estimated_minutes: 210, is_completed: true }),
+          node("open", [], { estimated_minutes: 45, actual_minutes: 15 }),
+        ],
       },
     ];
-    expect(completionVelocity(unlogged)).toBeNull();
+    // Before: 30 / 165 = 18.2%. The unlogged 3h 30m leaf now counts on budget.
+    expect(velocityFills(worked)).toEqual({
+      estimated: 240,
+      actual: 375,
+      fills: 2,
+      velocity: (240 / 375) * 100,
+    });
+    // The chart below the stat reads the same minutes, plus open worked leaves.
+    const [row] = temporalByCourse(
+      courses.filter((c) => c.id === worked[0].course_id),
+      worked,
+    );
+    expect(row).toMatchObject({ estimated: 285, actual: 390 });
+  });
+
+  it("returns null until a leaf is completed", () => {
+    const open = [
+      {
+        ...createMockState(NOW).assignments[0],
+        subtasks: [node("x", [], { actual_minutes: 20 })],
+      },
+    ];
+    expect(completionVelocity(open)).toBeNull();
+  });
+
+  it("tiers velocity: ahead at 100%+, on pace from 85%, overrun below", () => {
+    expect(velocityTier(100)).toBe("ahead");
+    expect(velocityTier(99.9)).toBe("pace");
+    expect(velocityTier(85)).toBe("pace");
+    expect(velocityTier(84.9)).toBe("overrun");
   });
 
   it("scores clustered deadlines as more volatile than spread ones", () => {
@@ -185,6 +227,46 @@ describe("metrics", () => {
     expect(load).toHaveLength(14);
     expect(assignmentVolatility(load)).toBeCloseTo(110.2, 0);
     expect(volatilityRegime(assignmentVolatility(load))).toBe("low");
+  });
+});
+
+describe("rubric breakdown", () => {
+  it("splits the rubric sentence into points, keeping parenthetical detail", () => {
+    const raft = createMockState(NOW).assignments.find(
+      (a) => a.id === "cs3801-raft",
+    )!;
+    expect(rubricBreakdown(raft)).toEqual([
+      {
+        criterion: "test harness",
+        percent: 60,
+        points: 90,
+        detail: "TestInitialElection3A, TestBasicAgree3B, TestPersist3C",
+      },
+      { criterion: "design doc", percent: 30, points: 45, detail: null },
+      { criterion: "code quality", percent: 10, points: 15, detail: null },
+    ]);
+  });
+
+  it("ignores percentages outside a rubric sentence", () => {
+    expect(
+      rubricBreakdown({
+        description:
+          "Report 95% confidence intervals in a four-page write-up. Rubric: accuracy 50%, clarity 50%. Late work loses 10% per day.",
+        points_possible: 40,
+      }).map((line) => [line.criterion, line.points]),
+    ).toEqual([
+      ["accuracy", 20],
+      ["clarity", 20],
+    ]);
+    expect(
+      rubricBreakdown({
+        description: "Report 95% confidence intervals.",
+        points_possible: 40,
+      }),
+    ).toEqual([]);
+    expect(rubricBreakdown({ description: null, points_possible: 40 })).toEqual(
+      [],
+    );
   });
 });
 

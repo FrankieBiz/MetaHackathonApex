@@ -6,7 +6,12 @@ import { useNow } from "@/hooks/useNow";
 import { API_BASE } from "@/lib/api";
 import { priorityScore, rollup } from "@/lib/engine";
 import { countdown, minutes, score } from "@/lib/format";
-import { activeCourseOf, isRemote, useTerminal } from "@/store/terminal";
+import {
+  TRIAGE_STREAM_MS,
+  activeCourseOf,
+  isRemote,
+  useTerminal,
+} from "@/store/terminal";
 import { studyOpportunity, studyTitleKey } from "@/lib/study";
 import type { Assignment, Course, SubTaskNode } from "@/types";
 
@@ -28,21 +33,28 @@ function TriageLog({
   remote: boolean;
   now: number;
 }) {
+  // Only a reachable backend runs Llama; offline, the local planner builds the tree.
+  const agent = remote ? "[META-LLAMA]" : "[LOCAL-PLANNER]";
   const lines = useMemo(
     () => [
-      `> TRIAGE ${assignment.course_code} "${assignment.title}"`,
+      {
+        tag: ">",
+        text: `TRIAGE ${assignment.course_code} "${assignment.title}"`,
+      },
       remote
-        ? `> POST ${API_BASE}/api/decompose`
-        : "> BACKEND OFFLINE · LOCAL PLANNER ENGAGED",
-      `> CONTEXT ${assignment.points_possible} PTS · ${assignment.weight.toFixed(1)}% WT${
-        assignment.due_at
-          ? ` · DUE IN ${countdown(Date.parse(assignment.due_at) - now)}`
-          : ""
-      }`,
-      remote
-        ? "> AWAITING LLAMA-3 DECOMPOSITION"
-        : "> MATCHING PLAYBOOK TO DELIVERABLE TYPE",
-      "> SPLITTING INTO 15–45 MIN MICRO-TASKS",
+        ? { tag: ">", text: `POST ${API_BASE}/api/decompose` }
+        : { tag: ">", text: "BACKEND OFFLINE · LOCAL PLANNER ENGAGED" },
+      {
+        tag: ">",
+        text: `CONTEXT ${assignment.points_possible} PTS · ${assignment.weight.toFixed(1)}% WT${
+          assignment.due_at
+            ? ` · DUE IN ${countdown(Date.parse(assignment.due_at) - now)}`
+            : ""
+        }`,
+      },
+      { tag: agent, text: "Parsing rubric constraints…" },
+      { tag: agent, text: "Generating atomic work tree…" },
+      { tag: agent, text: "Splitting into 15–45 min micro-tasks…" },
     ],
     // `now` only seeds the countdown line; the script must not restart every tick.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -51,7 +63,11 @@ function TriageLog({
   const [shown, setShown] = useState(1);
   useEffect(() => {
     if (shown >= lines.length) return;
-    const timer = setTimeout(() => setShown((n) => n + 1), 300);
+    // Every line lands inside the store's minimum stream window.
+    const timer = setTimeout(
+      () => setShown((n) => n + 1),
+      (TRIAGE_STREAM_MS - 100) / (lines.length - 1),
+    );
     return () => clearTimeout(timer);
   }, [shown, lines.length]);
 
@@ -62,7 +78,10 @@ function TriageLog({
           key={index}
           className={`log-line ${index === 0 ? "text-accent" : "text-ink-2"}`}
         >
-          {line}
+          <span className={line.tag === ">" ? "" : "text-accent"}>
+            {line.tag}
+          </span>{" "}
+          {line.text}
         </div>
       ))}
       <div className="mt-1 text-accent">
@@ -485,7 +504,7 @@ export function TaskTree() {
               size="lg"
               onClick={() => void triage(assignment.id)}
             >
-              DECONSTRUCT WITH LLAMA-3
+              ⚡ DECONSTRUCT WITH META LLAMA
             </Key>
             {!remote && (
               <p className="text-[11px] text-ink-3">

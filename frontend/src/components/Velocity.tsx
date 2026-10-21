@@ -17,13 +17,14 @@ import { useNow } from "@/hooks/useNow";
 import {
   assignmentVolatility,
   capacity,
-  completionVelocity,
   deadlineLoad,
-  leaves,
   temporalByCourse,
+  velocityFills,
+  velocityTier,
   volatilityRegime,
   type CourseTime,
   type Regime,
+  type VelocityTier,
 } from "@/lib/engine";
 import { minutes, pct } from "@/lib/format";
 import { useTerminal } from "@/store/terminal";
@@ -41,6 +42,12 @@ const REGIME: Record<Regime, { label: string; color: string }> = {
   low: { label: "LOW · EVENLY SPREAD", color: STATUS_COLOR.up },
   elevated: { label: "ELEVATED · CLUSTERING", color: STATUS_COLOR.accent },
   high: { label: "HIGH · DEADLINES STACKED", color: STATUS_COLOR.down },
+};
+
+const VELOCITY: Record<VelocityTier, { label: string; color: string }> = {
+  ahead: { label: "▲ AHEAD", color: STATUS_COLOR.up },
+  pace: { label: "◆ ON PACE", color: STATUS_COLOR.accent },
+  overrun: { label: "▼ OVERRUN", color: STATUS_COLOR.down },
 };
 
 function Stat({ label, children }: { label: string; children: ReactNode }) {
@@ -101,17 +108,7 @@ export function Velocity() {
   const hour = useNow(60_000);
   const [view, setView] = useState<"graph" | "table">("graph");
 
-  const velocity = useMemo(
-    () => completionVelocity(assignments),
-    [assignments],
-  );
-  const fills = useMemo(
-    () =>
-      assignments
-        .flatMap((a) => leaves(a.subtasks))
-        .filter((leaf) => leaf.is_completed && leaf.actual_minutes > 0),
-    [assignments],
-  );
+  const fills = useMemo(() => velocityFills(assignments), [assignments]);
   const load = useMemo(
     () => deadlineLoad(assignments, hour),
     [assignments, hour],
@@ -124,18 +121,9 @@ export function Velocity() {
     [courses, assignments],
   );
 
-  const fillEstimated = fills.reduce(
-    (sum, leaf) => sum + leaf.estimated_minutes,
-    0,
-  );
-  const fillActual = fills.reduce((sum, leaf) => sum + leaf.actual_minutes, 0);
-  const ahead = velocity !== null && velocity >= 100;
-  const velocityColor =
-    velocity === null
-      ? STATUS_COLOR.neutral
-      : ahead
-        ? STATUS_COLOR.up
-        : STATUS_COLOR.down;
+  const { velocity } = fills;
+  const tier = velocity === null ? null : VELOCITY[velocityTier(velocity)];
+  const velocityColor = tier?.color ?? STATUS_COLOR.neutral;
   // Fits the longest course code: 11px mono measures ~7px a character, plus the tick gap.
   const axisWidth = Math.min(
     120,
@@ -177,11 +165,7 @@ export function Velocity() {
                 className="text-[10px] tracking-wider"
                 style={{ color: velocityColor }}
               >
-                {velocity === null
-                  ? "NO FILLS"
-                  : ahead
-                    ? "▲ AHEAD"
-                    : "▼ OVERRUN"}
+                {tier?.label ?? "NO FILLS"}
               </span>
             </div>
             <Meter
@@ -191,9 +175,12 @@ export function Velocity() {
               marker={100}
               color={velocityColor}
             />
-            <div className="text-[10px] text-ink-3">
-              {minutes(fillEstimated)} EST / {minutes(fillActual)} ACT ·{" "}
-              {fills.length} FILLS
+            <div
+              className="text-[10px] text-ink-3"
+              title="Completed tasks with no logged time count as on budget"
+            >
+              {minutes(fills.estimated)} EST / {minutes(fills.actual)} ACT ·{" "}
+              {fills.fills} FILLS
             </div>
           </Stat>
 

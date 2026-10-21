@@ -212,23 +212,55 @@ export function updateSubtasks(
 // ----------------------------------------------------------------- metrics
 
 /**
- * Completion Velocity (§4.2): Σ estimated / max(Σ actual, 1) × 100 over
- * completed leaves. Leaves checked off without any logged time are left out —
- * they carry no actual to compare and would read as infinite speed.
+ * Minutes a leaf counts as having taken. A leaf checked off without any logged
+ * time is booked at its estimate (on budget): dropping it would let one
+ * overrun leaf stand in for the whole tree, and booking 0 would read as
+ * infinite speed.
  */
-export function completionVelocity(assignments: Assignment[]): number | null {
+export const effectiveActual = (leaf: SubTaskNode) =>
+  leaf.is_completed && leaf.actual_minutes <= 0
+    ? leaf.estimated_minutes
+    : leaf.actual_minutes;
+
+export interface VelocityFills {
+  estimated: number;
+  actual: number;
+  fills: number;
+  /** Σ estimated / max(Σ actual, 1) × 100; null with no completed leaves. */
+  velocity: number | null;
+}
+
+/** Completion Velocity (§4.2) with its inputs, over every completed leaf. */
+export function velocityFills(assignments: Assignment[]): VelocityFills {
   let estimated = 0;
   let actual = 0;
   let fills = 0;
   for (const assignment of assignments) {
     for (const leaf of leaves(assignment.subtasks)) {
-      if (!leaf.is_completed || leaf.actual_minutes <= 0) continue;
+      if (!leaf.is_completed) continue;
       estimated += leaf.estimated_minutes;
-      actual += leaf.actual_minutes;
+      actual += effectiveActual(leaf);
       fills += 1;
     }
   }
-  return fills ? (estimated / Math.max(actual, 1)) * 100 : null;
+  return {
+    estimated,
+    actual,
+    fills,
+    velocity: fills ? (estimated / Math.max(actual, 1)) * 100 : null,
+  };
+}
+
+export const completionVelocity = (assignments: Assignment[]) =>
+  velocityFills(assignments).velocity;
+
+export type VelocityTier = "ahead" | "pace" | "overrun";
+
+/** ≥100% beats the estimates; 85–100% is near budget; below 85% is an overrun. */
+export function velocityTier(velocity: number): VelocityTier {
+  if (velocity >= 100) return "ahead";
+  if (velocity >= 85) return "pace";
+  return "overrun";
 }
 
 /** Completion Velocity per course id; courses with no timed fills map to null. */
@@ -317,7 +349,10 @@ export interface CourseTime {
   actual: number;
 }
 
-/** Estimated vs actual minutes per course, over leaves that have been worked. */
+/**
+ * Estimated vs actual minutes per course, over leaves that have been worked.
+ * Completed leaves use their effective actual, matching Completion Velocity.
+ */
 export function temporalByCourse(
   courses: Course[],
   assignments: Assignment[],
@@ -331,7 +366,48 @@ export function temporalByCourse(
       course_id: course.id,
       course_code: course.course_code,
       estimated: worked.reduce((sum, leaf) => sum + leaf.estimated_minutes, 0),
-      actual: worked.reduce((sum, leaf) => sum + leaf.actual_minutes, 0),
+      actual: worked.reduce((sum, leaf) => sum + effectiveActual(leaf), 0),
+    };
+  });
+}
+
+// ------------------------------------------------------------------ rubric
+
+export interface RubricLine {
+  criterion: string;
+  /** Share of the assignment's points, 0–100. */
+  percent: number;
+  points: number;
+  /** Parenthetical detail, e.g. the named tests behind a test-harness line. */
+  detail: string | null;
+}
+
+/**
+ * Point breakdown from a "Rubric: a 60% (…), b 30%, c 10%." sentence in the
+ * prompt. Only that sentence is read, so "95% confidence intervals" elsewhere
+ * is never taken for a criterion. Empty when the prompt has no rubric.
+ */
+export function rubricBreakdown(
+  assignment: Pick<Assignment, "description" | "points_possible">,
+): RubricLine[] {
+  const text = assignment.description ?? "";
+  const start = text.search(/\brubric\s*:/i);
+  if (start < 0) return [];
+  const sentence = text
+    .slice(start)
+    .replace(/^rubric\s*:\s*/i, "")
+    .split(/\.(?=\s|$)/)[0];
+  return [
+    ...sentence.matchAll(
+      /([A-Za-z][\w\s'&/-]*?)\s*(\d+(?:\.\d+)?)\s*%\s*(?:\(([^)]*)\))?/g,
+    ),
+  ].map((match) => {
+    const percent = Number(match[2]);
+    return {
+      criterion: match[1].trim(),
+      percent,
+      points: (percent / 100) * assignment.points_possible,
+      detail: match[3]?.trim() || null,
     };
   });
 }

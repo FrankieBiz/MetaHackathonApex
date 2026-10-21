@@ -275,6 +275,15 @@ describe("terminal store without a backend", () => {
     const store = await loadStore();
     await store.getState().boot();
     expect(store.getState().mode).toBe("offline");
+    // The footer headline is the sandbox status, not the unreachable-API cause.
+    const { SANDBOX_READY } = await import("@/store/terminal");
+    const [headline, cause] = store.getState().events;
+    expect(headline).toMatchObject({ level: "ok", text: SANDBOX_READY });
+    expect(cause).toMatchObject({ level: "info" });
+    expect(cause.text).toMatch(/cannot reach/i);
+    await store.getState().sync();
+    expect(store.getState().events[0].text).toBe(SANDBOX_READY);
+    expect(store.getState().events.some((e) => e.level === "warn")).toBe(false);
 
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     const run = store.getState().triage(UNTRIAGED);

@@ -6,18 +6,20 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
-import { Key, Panel, Segmented, Spinner } from "@/components/ui";
+import { Key, Meter, Panel, Segmented, Spinner } from "@/components/ui";
 import { useNow } from "@/hooks/useNow";
 import {
   HOUR,
   priorityTier,
   rankQueue,
+  rubricBreakdown,
   type PriorityTier,
   type QueueEntry,
 } from "@/lib/engine";
 import { countdown, score as fmtScore } from "@/lib/format";
-import { activeCourseOf, useTerminal } from "@/store/terminal";
+import { activeCourseOf, isRemote, useTerminal } from "@/store/terminal";
 import { studyOpportunity } from "@/lib/study";
 import type { Assignment } from "@/types";
 
@@ -64,7 +66,16 @@ function StatusGlyph({ entry }: { entry: QueueEntry }) {
   );
 }
 
-function TriageButton({ assignment }: { assignment: Assignment }) {
+function TriageButton({
+  assignment,
+  label,
+  size,
+}: {
+  assignment: Assignment;
+  /** Idle label; defaults to the compact queue-row label. */
+  label?: ReactNode;
+  size?: "sm" | "lg";
+}) {
   const running = useTerminal((s) => Boolean(s.triaging[assignment.id]));
   const triage = useTerminal((s) => s.triage);
   const [armed, setArmed] = useState(false);
@@ -80,6 +91,7 @@ function TriageButton({ assignment }: { assignment: Assignment }) {
     return (
       <Key
         tone="accent"
+        size={size}
         active
         aria-disabled
         onClick={(event) => event.stopPropagation()}
@@ -93,6 +105,7 @@ function TriageButton({ assignment }: { assignment: Assignment }) {
   return (
     <Key
       tone={armed ? "down" : "accent"}
+      size={size}
       onClick={(event) => {
         event.stopPropagation();
         if (hasTree && !armed) {
@@ -113,14 +126,14 @@ function TriageButton({ assignment }: { assignment: Assignment }) {
           : undefined
       }
     >
-      {armed ? (
-        "CONFIRM REPLACE"
-      ) : (
-        <>
-          <span className="@lg:hidden">TRIAGE</span>
-          <span className="hidden @lg:inline">EXECUTE AI TRIAGE</span>
-        </>
-      )}
+      {armed
+        ? "CONFIRM REPLACE"
+        : (label ?? (
+            <>
+              <span className="@lg:hidden">TRIAGE</span>
+              <span className="hidden @lg:inline">EXECUTE AI TRIAGE</span>
+            </>
+          ))}
     </Key>
   );
 }
@@ -152,6 +165,192 @@ function PriorityCell({ score, max }: { score: number; max: number }) {
         {tier[0].toUpperCase()}
       </span>
     </div>
+  );
+}
+
+/** Canvas prompts can run to 100k characters; the preview needs the opening. */
+const PREVIEW_CHARS = 4000;
+
+function Caption({ children }: { children: ReactNode }) {
+  return (
+    <div className="text-[10px] tracking-wider text-ink-3 uppercase">
+      {children}
+    </div>
+  );
+}
+
+function Fact({
+  label,
+  value,
+  title,
+}: {
+  label: string;
+  value: string;
+  title?: string;
+}) {
+  return (
+    <div className="flex items-baseline gap-1.5" title={title}>
+      <dt className="text-[10px] tracking-wider text-ink-3 uppercase">
+        {label}
+      </dt>
+      <dd className="text-[12px] text-ink">{value}</dd>
+    </div>
+  );
+}
+
+/** Docked under the queue: the selected deliverable's prompt, rubric, and points. */
+function Inspector() {
+  const assignment = useTerminal(
+    (s) => s.data?.assignments.find((a) => a.id === s.selectedId) ?? null,
+  );
+  const course = useTerminal(activeCourseOf);
+  const remote = useTerminal((s) => isRemote(s.mode));
+  const rubric = useMemo(
+    () => (assignment ? rubricBreakdown(assignment) : []),
+    [assignment],
+  );
+
+  const prompt = assignment?.description?.trim() ?? "";
+  const completed = assignment?.status === "completed";
+
+  return (
+    <section
+      aria-label="Deliverable inspector and rubric preview"
+      // Gives way to the queue first, then scrolls inside; grows into spare height.
+      className="flex min-h-[172px] shrink-[4] grow flex-col border-t border-line-strong"
+    >
+      <header className="flex h-7 shrink-0 items-center justify-between gap-3 border-b border-line bg-head px-2.5 text-[10px] tracking-wider uppercase">
+        <span className="min-w-0 truncate text-accent">
+          Deliverable inspector &amp; rubric preview
+          {assignment && (
+            <span className="text-ink-3">
+              {" "}
+              · SEL ▸{" "}
+              <span className="text-ink-2">{assignment.course_code}</span>
+            </span>
+          )}
+        </span>
+        {assignment &&
+          (completed ? (
+            <span className="shrink-0 text-up">✓ FILLED</span>
+          ) : (
+            <TriageButton
+              assignment={assignment}
+              label="⚡ DECONSTRUCT WITH META LLAMA"
+            />
+          ))}
+      </header>
+
+      {!assignment ? (
+        <p className="px-2.5 py-4 text-ink-3">
+          Select a deliverable to inspect its prompt, rubric, and point
+          breakdown.
+        </p>
+      ) : (
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-px overflow-y-auto bg-line @xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] @xl:grid-rows-[minmax(0,1fr)] @xl:overflow-hidden">
+          <div className="flex min-w-0 flex-col gap-1.5 bg-panel px-2.5 py-2 @xl:overflow-y-auto">
+            <div
+              className="shrink-0 truncate text-[12px] text-ink"
+              title={assignment.title}
+            >
+              {assignment.title}
+            </div>
+            <Caption>Prompt / rubric · raw</Caption>
+            <p
+              tabIndex={0}
+              aria-label="Assignment prompt"
+              className="min-h-[4.5em] flex-1 overflow-y-auto border border-line bg-canvas px-2 py-1.5 text-[11px] leading-relaxed break-words whitespace-pre-line text-ink-2 outline-none focus-visible:border-accent"
+            >
+              <span className="text-accent">&gt; </span>
+              {prompt
+                ? prompt.length > PREVIEW_CHARS
+                  ? `${prompt.slice(0, PREVIEW_CHARS)}…`
+                  : prompt
+                : "No prompt text published in Canvas."}
+            </p>
+            {course?.syllabus && (
+              <>
+                <Caption>Syllabus · {course.name}</Caption>
+                <p
+                  className="line-clamp-2 shrink-0 text-[11px] leading-relaxed break-words text-ink-3"
+                  title={course.syllabus.slice(0, PREVIEW_CHARS)}
+                >
+                  {course.syllabus}
+                </p>
+              </>
+            )}
+          </div>
+
+          <div className="flex min-w-0 flex-col gap-1.5 bg-panel px-2.5 py-2 @xl:overflow-y-auto">
+            <dl className="flex flex-wrap gap-x-4 gap-y-1">
+              <Fact label="Points" value={String(assignment.points_possible)} />
+              <Fact label="Weight" value={`${assignment.weight.toFixed(1)}%`} />
+              <Fact
+                label="Grade / pt"
+                value={
+                  assignment.points_possible
+                    ? `${(assignment.weight / assignment.points_possible).toFixed(3)}%`
+                    : "—"
+                }
+                title="Share of the final grade each point on this deliverable is worth"
+              />
+            </dl>
+            <Caption>
+              Point breakdown
+              {rubric.length ? "" : " · no rubric weights in prompt"}
+            </Caption>
+            {rubric.length ? (
+              <ul className="flex flex-col gap-1">
+                {rubric.map((line, index) => (
+                  <li
+                    key={index}
+                    className="flex flex-col gap-0.5 text-[11px]"
+                    title={line.detail ?? undefined}
+                  >
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="truncate text-ink-2 uppercase">
+                        {line.criterion}
+                      </span>
+                      <span className="shrink-0 whitespace-nowrap text-ink">
+                        {fmtScore(line.points)} PTS{" "}
+                        <span className="text-ink-3">· {line.percent}%</span>
+                      </span>
+                    </div>
+                    <Meter
+                      label={`${line.criterion}: ${line.percent}% of the points`}
+                      value={line.percent}
+                      max={100}
+                      color="var(--color-accent)"
+                    />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="flex flex-col gap-0.5 text-[11px]">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-ink-2">HOLISTIC</span>
+                  <span className="text-ink">
+                    {assignment.points_possible} PTS{" "}
+                    <span className="text-ink-3">· 100%</span>
+                  </span>
+                </div>
+                <Meter
+                  label="Holistic grading: 100% of the points"
+                  value={100}
+                  max={100}
+                  color="var(--color-ink-3)"
+                />
+              </div>
+            )}
+            {!remote && !completed && (
+              <p className="mt-auto pt-1 text-[10px] text-ink-3">
+                Backend offline · deconstruct runs the local planner
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -223,10 +422,12 @@ export function OrderBook() {
         />
       }
     >
-      <div className="flex min-h-full flex-col">
+      {/* The queue scrolls on its own so the inspector stays docked; with few
+          rows the inspector grows into the space instead. */}
+      <div className="flex h-full flex-col">
         <nav
           aria-label="Active course for study triage"
-          className="flex flex-wrap gap-2 border-b border-line px-2.5 py-2"
+          className="flex shrink-0 flex-wrap gap-2 border-b border-line px-2.5 py-2"
         >
           {courses?.map((course) => {
             const opportunity = studyOpportunity(assignments, course.id, now);
@@ -246,114 +447,118 @@ export function OrderBook() {
             );
           })}
         </nav>
-        <table className="w-full border-collapse text-[12px]">
-          <caption className="sr-only">
-            Open assignments sorted by priority score: weight times points over
-            hours until due.
-          </caption>
-          <thead className="sticky top-0 z-10 bg-panel text-[10px] tracking-wider text-ink-3 uppercase">
-            <tr className="border-b border-line">
-              <th
-                scope="col"
-                className="py-1 pr-2 pl-2.5 text-left font-normal"
-              >
-                Course
-              </th>
-              <th
-                scope="col"
-                className="w-full px-2 py-1 text-left font-normal"
-              >
-                Deliverable
-              </th>
-              <th scope="col" className="px-2 py-1 text-right font-normal">
-                Due in
-              </th>
-              <th
-                scope="col"
-                className="hidden px-2 py-1 text-right font-normal @xl:table-cell"
-              >
-                Wt%
-              </th>
-              <th scope="col" className="px-2 py-1 text-right font-normal">
-                Priority
-              </th>
-              <th
-                scope="col"
-                className="hidden py-1 pr-2.5 pl-2 text-right font-normal @md:table-cell"
-              >
-                <span className="sr-only">Action</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody ref={body}>
-            {rows.map((entry, index) => {
-              const { assignment, hours } = entry;
-              const selected = assignment.id === selectedId;
-              const completed = assignment.status === "completed";
-              return (
-                <tr
-                  key={assignment.id}
-                  tabIndex={0}
-                  aria-current={selected ? "true" : undefined}
-                  onClick={() => select(assignment.id)}
-                  onKeyDown={(event) => onRowKey(event, index)}
-                  className={`cursor-pointer border-b border-line/70 outline-none focus-visible:bg-hover ${
-                    selected
-                      ? "bg-accent/10 shadow-[inset_2px_0_0_var(--color-accent)]"
-                      : "hover:bg-hover"
-                  } ${completed ? "opacity-60" : ""}`}
+        <div className="min-h-[96px] shrink overflow-y-auto">
+          <table className="w-full border-collapse text-[12px]">
+            <caption className="sr-only">
+              Open assignments sorted by priority score: weight times points
+              over hours until due.
+            </caption>
+            <thead className="sticky top-0 z-10 bg-panel text-[10px] tracking-wider text-ink-3 uppercase">
+              <tr className="border-b border-line">
+                <th
+                  scope="col"
+                  className="py-1 pr-2 pl-2.5 text-left font-normal"
                 >
-                  <td className="py-1 pr-2 pl-2.5 whitespace-nowrap">
-                    <span className="mr-1.5 inline-block w-[1ch] text-center">
-                      <StatusGlyph entry={entry} />
-                    </span>
-                    <span className={selected ? "text-accent" : "text-ink"}>
-                      {assignment.course_code}
-                    </span>
-                  </td>
-                  <td className="w-full max-w-0 px-2 py-1">
-                    <span
-                      className="block truncate text-ink-2"
-                      title={assignment.title}
-                    >
-                      {assignment.title}
-                    </span>
-                  </td>
-                  <td
-                    className={`px-2 py-1 text-right whitespace-nowrap ${dueTone(hours, completed)}`}
+                  Course
+                </th>
+                <th
+                  scope="col"
+                  className="w-full px-2 py-1 text-left font-normal"
+                >
+                  Deliverable
+                </th>
+                <th scope="col" className="px-2 py-1 text-right font-normal">
+                  Due in
+                </th>
+                <th
+                  scope="col"
+                  className="hidden px-2 py-1 text-right font-normal @xl:table-cell"
+                >
+                  Wt%
+                </th>
+                <th scope="col" className="px-2 py-1 text-right font-normal">
+                  Priority
+                </th>
+                <th
+                  scope="col"
+                  className="hidden py-1 pr-2.5 pl-2 text-right font-normal @md:table-cell"
+                >
+                  <span className="sr-only">Action</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody ref={body}>
+              {rows.map((entry, index) => {
+                const { assignment, hours } = entry;
+                const selected = assignment.id === selectedId;
+                const completed = assignment.status === "completed";
+                return (
+                  <tr
+                    key={assignment.id}
+                    tabIndex={0}
+                    aria-current={selected ? "true" : undefined}
+                    onClick={() => select(assignment.id)}
+                    onKeyDown={(event) => onRowKey(event, index)}
+                    className={`cursor-pointer border-b border-line/70 outline-none focus-visible:bg-hover ${
+                      selected
+                        ? "bg-accent/10 shadow-[inset_2px_0_0_var(--color-accent)]"
+                        : "hover:bg-hover"
+                    } ${completed ? "opacity-60" : ""}`}
                   >
-                    {completed
-                      ? "FILLED"
-                      : assignment.due_at
-                        ? countdown(Date.parse(assignment.due_at) - now)
-                        : "—"}
-                  </td>
-                  <td className="hidden px-2 py-1 text-right text-ink-2 @xl:table-cell">
-                    {assignment.weight.toFixed(1)}
-                  </td>
-                  <td className="px-2 py-1 text-right whitespace-nowrap">
-                    {completed ? (
-                      <span className="text-ink-3">—</span>
-                    ) : (
-                      <PriorityCell score={entry.priority} max={max} />
-                    )}
-                  </td>
-                  <td className="hidden py-1 pr-2.5 pl-2 text-right @md:table-cell">
-                    {!completed && <TriageButton assignment={assignment} />}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                    <td className="py-1 pr-2 pl-2.5 whitespace-nowrap">
+                      <span className="mr-1.5 inline-block w-[1ch] text-center">
+                        <StatusGlyph entry={entry} />
+                      </span>
+                      <span className={selected ? "text-accent" : "text-ink"}>
+                        {assignment.course_code}
+                      </span>
+                    </td>
+                    <td className="w-full max-w-0 px-2 py-1">
+                      <span
+                        className="block truncate text-ink-2"
+                        title={assignment.title}
+                      >
+                        {assignment.title}
+                      </span>
+                    </td>
+                    <td
+                      className={`px-2 py-1 text-right whitespace-nowrap ${dueTone(hours, completed)}`}
+                    >
+                      {completed
+                        ? "FILLED"
+                        : assignment.due_at
+                          ? countdown(Date.parse(assignment.due_at) - now)
+                          : "—"}
+                    </td>
+                    <td className="hidden px-2 py-1 text-right text-ink-2 @xl:table-cell">
+                      {assignment.weight.toFixed(1)}
+                    </td>
+                    <td className="px-2 py-1 text-right whitespace-nowrap">
+                      {completed ? (
+                        <span className="text-ink-3">—</span>
+                      ) : (
+                        <PriorityCell score={entry.priority} max={max} />
+                      )}
+                    </td>
+                    <td className="hidden py-1 pr-2.5 pl-2 text-right @md:table-cell">
+                      {!completed && <TriageButton assignment={assignment} />}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
 
-        {!rows.length && (
-          <p className="px-2.5 py-6 text-ink-3">
-            Queue is clear. Sync to pull new assignments from Canvas.
-          </p>
-        )}
+          {!rows.length && (
+            <p className="px-2.5 py-6 text-ink-3">
+              Queue is clear. Sync to pull new assignments from Canvas.
+            </p>
+          )}
+        </div>
 
-        <footer className="sticky bottom-0 mt-auto flex flex-wrap gap-x-4 border-t border-line bg-panel px-2.5 py-1 text-[10px] tracking-wider text-ink-3 uppercase">
+        <Inspector />
+
+        <footer className="flex shrink-0 flex-wrap gap-x-4 border-t border-line bg-panel px-2.5 py-1 text-[10px] tracking-wider text-ink-3 uppercase">
           <span>
             Open <span className="text-ink">{queue.length}</span>
           </span>

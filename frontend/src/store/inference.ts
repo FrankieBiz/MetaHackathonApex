@@ -28,27 +28,51 @@ export const useInference = create<InferenceState>((set) => ({
   finish: (telemetry, status) => set({ telemetry, status }),
 }));
 
+/** The backend's default Meta model, shown until /api/engine names the served one. */
+const DEFAULT_MODEL = "Llama-3.3-70B-Instruct";
+
+export interface InferencePill {
+  model: string;
+  detail: string;
+  /** measured: a real round-trip; idle: nothing measured; offline: no model ran. */
+  tone: "measured" | "running" | "idle" | "offline";
+}
+
+/** Measured numbers only: local and saved plans never report model throughput. */
+export function inferencePill(
+  state: Pick<InferenceState, "status" | "configuration" | "telemetry">,
+): InferencePill {
+  const model = (
+    state.telemetry?.model_used ??
+    state.configuration?.model ??
+    DEFAULT_MODEL
+  )
+    .replace(/^meta-llama\//i, "")
+    .replace(/-Instruct$/i, "")
+    .toUpperCase();
+  const { telemetry } = state;
+  switch (state.status) {
+    case "local":
+      return { model, detail: "LOCAL PLANNER · NO INFERENCE", tone: "offline" };
+    case "cached":
+      return { model, detail: "SAVED PLAN · NO INFERENCE", tone: "offline" };
+    case "unavailable":
+      return { model, detail: "UNAVAILABLE", tone: "offline" };
+    case "running":
+      return { model, detail: "INFERENCING…", tone: "running" };
+  }
+  return telemetry
+    ? {
+        model,
+        detail: `${telemetry.tokens_per_sec?.toFixed(1) ?? "—"} TOK/S · ${Math.round(telemetry.latency_ms)}MS`,
+        tone: "measured",
+      }
+    : { model, detail: "— TOK/S · — MS", tone: "idle" };
+}
+
 export function inferenceLabel(
   state: Pick<InferenceState, "status" | "configuration" | "telemetry">,
 ) {
-  const model = state.telemetry?.model_used ?? state.configuration?.model;
-  if (state.status === "local")
-    return "ENGINE: LOCAL STARTER [NO MODEL INFERENCE]";
-  if (state.status === "cached")
-    return "ENGINE: SAVED PLAN [NO MODEL INFERENCE]";
-  const identity = model
-    ? `${state.configuration?.provider === "meta" || /llama/i.test(model) ? "META " : ""}${model
-        .replace(/^meta-llama\//i, "")
-        .replace(/-Instruct$/i, "")
-        .toUpperCase()}`
-    : "LLAMA";
-  const detail =
-    state.status === "running"
-      ? "INFERENCING…"
-      : state.status === "unavailable"
-        ? "UNAVAILABLE"
-        : state.telemetry
-          ? `⚡ ${state.telemetry.tokens_per_sec?.toFixed(1) ?? "—"} tok/s | ${state.telemetry.latency_ms}ms`
-          : "AWAITING INFERENCE";
-  return `ENGINE: ${identity} [${detail}]`;
+  const { model, detail } = inferencePill(state);
+  return `${model} // ${detail}`;
 }

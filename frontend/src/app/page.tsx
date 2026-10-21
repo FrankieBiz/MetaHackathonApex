@@ -92,6 +92,16 @@ const LEVEL_COLOR: Record<TerminalEvent["level"], string> = {
   error: "text-down",
 };
 
+/** `SYS //` system lines carry an amber prefix ahead of their level color. */
+function EventText({ text }: { text: string }) {
+  if (!text.startsWith("SYS // ")) return text;
+  return (
+    <>
+      <span className="text-accent">SYS //</span> {text.slice(7)}
+    </>
+  );
+}
+
 function StatusBar() {
   const events = useTerminal((s) => s.events);
   const pending = useTerminal((s) => s.pendingWrites);
@@ -106,7 +116,9 @@ function StatusBar() {
           {events.map((event) => (
             <div key={event.id} className="flex gap-3 px-3 py-0.5">
               <time className="shrink-0 text-ink-3">{stamp(event.at)}</time>
-              <span className={LEVEL_COLOR[event.level]}>{event.text}</span>
+              <span className={LEVEL_COLOR[event.level]}>
+                <EventText text={event.text} />
+              </span>
             </div>
           ))}
         </div>
@@ -125,7 +137,7 @@ function StatusBar() {
               role="status"
               aria-live="polite"
             >
-              {latest.text}
+              <EventText text={latest.text} />
             </span>
           ) : (
             <span className="text-ink-3">Ready.</span>

@@ -2,7 +2,12 @@
 
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { api } from "@/lib/api";
-import { inferenceLabel, useInference } from "@/store/inference";
+import {
+  inferenceLabel,
+  inferencePill,
+  useInference,
+  type InferencePill,
+} from "@/store/inference";
 import { Key, Spinner } from "@/components/ui";
 import { useNow } from "@/hooks/useNow";
 import {
@@ -12,7 +17,9 @@ import {
   isActive,
   portfolio,
   velocityByCourse,
+  velocityTier,
   volatilityRegime,
+  type VelocityTier,
 } from "@/lib/engine";
 import { clock, pct, signed } from "@/lib/format";
 import { isRemote, useTerminal } from "@/store/terminal";
@@ -40,6 +47,17 @@ function Clock() {
 
 const SIMULATION = "[MODE: ISOLATED SIMULATION DESK]";
 
+const PILL_TONE: Record<
+  InferencePill["tone"],
+  { frame: string; detail: string }
+> = {
+  measured: { frame: "border-up/50 bg-up/10", detail: "text-up" },
+  running: { frame: "border-accent/60 bg-accent/10", detail: "text-accent" },
+  idle: { frame: "border-accent/40", detail: "text-accent" },
+  offline: { frame: "border-line-strong", detail: "text-ink-3" },
+};
+
+/** Meta Llama telemetry: measured throughput and round-trip latency of the last triage. */
 function EngineBadge() {
   const state = useInference();
   const remote = useTerminal((s) => isRemote(s.mode));
@@ -67,17 +85,38 @@ function EngineBadge() {
     };
   }, [remote]);
   const telemetry = state.telemetry;
+  const pill = inferencePill(state);
+  const tone = PILL_TONE[pill.tone];
   return (
     <div
       role="status"
-      className="border border-accent/40 px-1.5 py-0.5 text-[11px] text-accent"
+      aria-label={`Meta Llama engine: ${inferenceLabel(state)}`}
+      className={`flex h-[22px] items-center gap-1.5 border px-1.5 text-[11px] ${tone.frame}`}
       title={
         telemetry
-          ? `Prompt: ${telemetry.prompt_tokens ?? "unreported"} tokens; completion: ${telemetry.completion_tokens ?? "unreported"} tokens. Throughput = completion tokens / full API round-trip seconds.`
-          : "Meta Model API · Llama. Execute AI triage to measure inference."
+          ? `Meta Model API. Prompt: ${telemetry.prompt_tokens ?? "unreported"} tokens; completion: ${telemetry.completion_tokens ?? "unreported"} tokens. Throughput = completion tokens / full API round-trip seconds.`
+          : pill.tone === "offline"
+            ? "Meta Model API · no model inference ran for the current plan."
+            : "Meta Model API · Llama. Execute AI triage to measure inference."
       }
     >
-      {inferenceLabel(state)}
+      {pill.tone === "running" ? (
+        <Spinner />
+      ) : (
+        <span aria-hidden className={tone.detail}>
+          ●
+        </span>
+      )}
+      <span className="font-semibold text-ink">{pill.model}</span>
+      <span aria-hidden className="text-ink-3">
+        {"//"}
+      </span>
+      <span
+        key={pill.detail}
+        className={`${tone.detail} ${pill.tone === "measured" ? "tick-flash" : ""}`}
+      >
+        {pill.detail}
+      </span>
     </div>
   );
 }
@@ -165,8 +204,14 @@ function MarginTag({ margin }: { margin: number | null }) {
   );
 }
 
+const VELOCITY_TONE: Record<VelocityTier, string> = {
+  ahead: "text-up",
+  pace: "text-accent",
+  overrun: "text-down",
+};
+
 const velocityTone = (velocity: number | null) =>
-  velocity === null ? "text-ink-3" : velocity >= 100 ? "text-up" : "text-down";
+  velocity === null ? "text-ink-3" : VELOCITY_TONE[velocityTier(velocity)];
 
 function TapeItem({
   course,
@@ -216,7 +261,7 @@ function FocusVelocity() {
   return (
     <div
       className="flex shrink-0 items-center gap-2 border-r border-line bg-head px-3"
-      title="Completion Velocity for the course in the execution deck: estimated ÷ logged minutes on finished tasks"
+      title="Completion Velocity for the course in the execution deck: estimated ÷ actual minutes on finished tasks (unlogged finished tasks count as on budget)"
       aria-live="polite"
       aria-atomic
     >
@@ -330,9 +375,9 @@ export function TopBar() {
           </span>
         </div>
         <Clock />
-        <EngineBadge />
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
           <ConnectionBadge />
+          <EngineBadge />
           <Key
             tone="accent"
             onClick={() => void sync()}

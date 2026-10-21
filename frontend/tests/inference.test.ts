@@ -19,16 +19,19 @@ describe("inference badge", () => {
   };
   it("renders the served model and measured round-trip throughput", () => {
     expect(inferenceLabel({ configuration, telemetry, status: "ai" })).toBe(
-      "ENGINE: META LLAMA-3.3-70B [⚡ 200.0 tok/s | 500ms]",
+      "LLAMA-3.3-70B // 200.0 TOK/S · 500MS",
     );
+    expect(
+      inferenceLabel({ configuration: null, telemetry: null, status: "ready" }),
+    ).toBe("LLAMA-3.3-70B // — TOK/S · — MS");
   });
   it("distinguishes local and cached plans from model inference", () => {
     expect(
       inferenceLabel({ configuration, telemetry: null, status: "local" }),
-    ).toContain("LOCAL STARTER [NO MODEL INFERENCE]");
+    ).toContain("LOCAL PLANNER · NO INFERENCE");
     expect(
       inferenceLabel({ configuration, telemetry: null, status: "cached" }),
-    ).toContain("SAVED PLAN [NO MODEL INFERENCE]");
+    ).toContain("SAVED PLAN · NO INFERENCE");
     expect(
       inferenceLabel({ configuration, telemetry, status: "unavailable" }),
     ).toContain("UNAVAILABLE");
@@ -44,6 +47,6 @@ describe("inference badge", () => {
         telemetry: { ...telemetry, tokens_per_sec: null },
         status: "ai",
       }),
-    ).toContain("— tok/s");
+    ).toContain("— TOK/S · 500MS");
   });
 });
