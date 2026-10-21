@@ -29,7 +29,7 @@ from .models import (
     TerminalState,
 )
 from .persistence import SupabaseStore
-from .service import TerminalService
+from .service import MonteCarloRequest, MonteCarloResponse, TerminalService
 from .syllabus_presets import SyllabusPresetDescriptor, list_presets
 
 
@@ -202,6 +202,13 @@ def create_app(
         return await generate_study_triage(
             body, settings=config, client=request.app.state.terminal.llm
         )
+
+    @app.post("/api/v1/simulate/monte-carlo", response_model=MonteCarloResponse)
+    async def monte_carlo(body: MonteCarloRequest, request: Request) -> MonteCarloResponse:
+        try:
+            return await request.app.state.terminal.monte_carlo(body)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get("/api/v1/syllabus/presets", response_model=list[SyllabusPresetDescriptor])
     async def syllabus_presets() -> list[SyllabusPresetDescriptor]:

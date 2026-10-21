@@ -3,10 +3,13 @@
 import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from statistics import pstdev
+from random import Random
+from statistics import fmean, pstdev
+from typing import Annotated
 from uuid import NAMESPACE_URL, uuid5
 
 from openai import AsyncOpenAI
+from pydantic import AliasChoices, Field
 
 from .ai_engine import (
     extract_syllabus,
@@ -25,7 +28,9 @@ from .models import (
     AssignmentModel,
     CourseModel,
     DecomposeResponse,
+    Identifier,
     InferenceTelemetry,
+    StrictModel,
     StudyInsertRequest,
     SubTaskNode,
     SubTaskUpdate,
@@ -37,6 +42,115 @@ from .models import (
 )
 from .persistence import RestoreUnavailable, SupabaseStore
 from .tasks import find, patch_tree, set_completed, walk
+
+
+class MonteCarloRequest(StrictModel):
+    course_id: Identifier | None = None
+    iterations: Annotated[int, Field(ge=100, le=10_000)] = 1000
+    # Overrides are fixed assignment percentage scores, independent of point totals.
+    shock_overrides: dict[Identifier, Annotated[float, Field(ge=0, le=100)]] = Field(
+        default_factory=dict, validation_alias=AliasChoices("shock_overrides", "shocks")
+    )
+
+
+class ScorePercentiles(StrictModel):
+    p10: float
+    p25: float
+    p50: float
+    p75: float
+    p90: float
+
+
+class AssignmentSensitivity(StrictModel):
+    assignment_id: str
+    weight: float
+    # Final course percentage points gained per assignment percentage point.
+    marginal_impact: float
+
+
+class CourseSimulation(StrictModel):
+    course_id: str
+    target_score: float
+    percentiles: ScorePercentiles | None
+    # 90% downside VaR: max(0, mean simulated score - p10), in percentage points.
+    var_90: float | None
+    # A probability in [0, 1]; unavailable without any grade observations.
+    probability_of_target: float | None
+    sensitivity_matrix: list[AssignmentSensitivity]
+
+
+class MonteCarloResponse(StrictModel):
+    iterations: int
+    courses: list[CourseSimulation]
+
+
+def _simulate_course(
+    course: CourseModel, assignments: list[AssignmentModel], request: MonteCarloRequest
+) -> CourseSimulation:
+    remaining = sorted(
+        (a for a in assignments if not a.graded and a.weight > 0), key=lambda a: a.id
+    )
+    total_weight = max(100.0, sum(a.weight for a in remaining))
+    sensitivity = [
+        AssignmentSensitivity(
+            assignment_id=a.id, weight=a.weight, marginal_impact=a.weight / total_weight
+        )
+        for a in remaining
+    ]
+    history = [point.score for point in course.grade_history]
+    # Canvas does not supply grade history; posted assignment grades are the fallback.
+    posted = [
+        100 * a.score / a.points_possible
+        for a in assignments
+        if a.graded and a.score is not None and a.points_possible > 0
+    ]
+    observations = history if len(history) >= 2 else posted
+    current = course.current_score
+    if current is None and (history or posted):
+        current = fmean(history or posted)
+    result = CourseSimulation(
+        course_id=course.id,
+        target_score=course.target_score,
+        percentiles=None,
+        var_90=None,
+        probability_of_target=None,
+        sensitivity_matrix=sensitivity,
+    )
+    # A brand-new course has no defensible baseline; do not invent an earned grade.
+    # Fully specified shocks can still determine a course whose entire weight is open.
+    fully_specified = sum(a.weight for a in remaining) >= 100 and all(
+        a.id in request.shock_overrides for a in remaining
+    )
+    if current is None and not fully_specified:
+        return result
+    current = min(100.0, max(0.0, current if current is not None else 0.0))
+    spread = pstdev(observations) if len(observations) >= 2 else 10.0
+    paths = [current * (1 - sum(a.weight for a in remaining) / total_weight)] * request.iterations
+    for assignment, row in zip(remaining, sensitivity, strict=True):
+        # Per-assignment seeds keep other paths stable when a shock or filter changes.
+        rng = Random(f"apex-monte-carlo:{course.id}:{assignment.id}")
+        override = request.shock_overrides.get(assignment.id)
+        for index in range(request.iterations):
+            score = (
+                override
+                if override is not None
+                else min(100.0, max(0.0, rng.gauss(current, spread)))
+            )
+            paths[index] += row.marginal_impact * score
+    paths.sort()
+
+    def percentile(q: float) -> float:
+        position = (len(paths) - 1) * q
+        low = int(position)
+        high = min(low + 1, len(paths) - 1)
+        return paths[low] + (paths[high] - paths[low]) * (position - low)
+
+    result.percentiles = ScorePercentiles(
+        **{f"p{p}": percentile(p / 100) for p in (10, 25, 50, 75, 90)}
+    )
+    result.var_90 = max(0.0, fmean(paths) - result.percentiles.p10)
+    result.probability_of_target = sum(score >= course.target_score for score in paths) / len(paths)
+    return result
 
 
 class TerminalService:
@@ -71,6 +185,38 @@ class TerminalService:
             assert self._state is not None
             self._recalculate(self._state)
             return self._state.model_copy(deep=True)
+
+    async def monte_carlo(self, request: MonteCarloRequest) -> MonteCarloResponse:
+        state = await self.state()
+        courses = [
+            c for c in state.courses if request.course_id is None or c.id == request.course_id
+        ]
+        if request.course_id is not None and not courses:
+            raise KeyError(request.course_id)
+        selected = {c.id for c in courses}
+        eligible = {
+            a.id
+            for a in state.assignments
+            if a.course_id in selected and not a.graded and a.weight > 0
+        }
+        if request.shock_overrides.keys() - eligible:
+            raise ValueError("Shock overrides must reference remaining weighted assignments")
+
+        def simulate() -> MonteCarloResponse:
+            return MonteCarloResponse(
+                iterations=request.iterations,
+                courses=[
+                    _simulate_course(
+                        course,
+                        [a for a in state.assignments if a.course_id == course.id],
+                        request,
+                    )
+                    for course in courses
+                ],
+            )
+
+        # CPU work uses a snapshot outside the state lock and off the async request loop.
+        return await asyncio.to_thread(simulate)
 
     async def _sync(self, *, force: bool = False) -> None:
         snapshot = await self.canvas.sync(force=force)
