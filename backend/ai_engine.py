@@ -41,6 +41,10 @@ SYSTEM_PROMPT = (
     "estimated_minutes. When an agent_brief is supplied, it holds the audited rubric "
     "constraints, the lowest score that protects the course target, and the student's open "
     "workload; order root tasks so the highest-weighted criteria are secured first. "
+    "Ground each micro-task in a named rubric criterion and its stated deliverable; "
+    "include a concrete acceptance check in each leaf title using 'done when ...'. "
+    "Use the rubric's actual tests, evidence, quantities, and requirements, without "
+    "inventing requirements or generic tasks when specific criteria are available. "
     "Return strict JSON. "
     'Use exactly this shape: {"sequencing_rationale":"...",'
     '"subtasks":[{"title":"...","estimated_minutes":30,"children":[]}]}. '
@@ -54,7 +58,9 @@ SYSTEM_PROMPT = (
 class _PlanNode(StrictModel):
     title: Title
     estimated_minutes: Annotated[int, Field(ge=15, le=45)]
-    children: Annotated[list["_PlanNode"], Field(max_length=8)]
+    # Keep the model schema non-recursive for Meta. Each child is validated during
+    # materialization, where the depth and total-node limits are also enforced.
+    children: Annotated[list[dict], Field(max_length=8)]
 
 
 class _Plan(StrictModel):
@@ -83,7 +89,7 @@ def _materialize(assignment: AssignmentModel, plan: _Plan) -> list[SubTaskNode]:
             title=node.title.strip(),
             estimated_minutes=node.estimated_minutes,
             children=[
-                convert(child, f"{path}.{i}", identifier, depth + 1)
+                convert(_PlanNode.model_validate(child), f"{path}.{i}", identifier, depth + 1)
                 for i, child in enumerate(node.children)
             ],
         )
@@ -92,6 +98,36 @@ def _materialize(assignment: AssignmentModel, plan: _Plan) -> list[SubTaskNode]:
 
 
 def fallback_tree(assignment: AssignmentModel) -> list[SubTaskNode]:
+    constraints = rubric_constraints(assignment)
+    if constraints:
+        # At most six phases of eight leaves, within the same bounds as model plans.
+        tasks = [
+            {
+                "title": (
+                    f"Complete {criterion.partition(':')[0][:180]}; done when "
+                    f"{criterion.partition(':')[2].strip()[:280]}"
+                    if ":" in criterion and criterion.partition(":")[2].strip()
+                    else f"Complete {criterion[:260]}; done when its stated requirements "
+                    "are present and checked against the deliverable."
+                ),
+                "estimated_minutes": 30,
+                "children": [],
+            }
+            for criterion in constraints[:48]
+        ]
+        return _materialize(
+            assignment,
+            _Plan(
+                subtasks=[
+                    _PlanNode(
+                        title=f"Secure rubric criteria {i + 1}–{min(i + 8, len(tasks))}",
+                        estimated_minutes=30,
+                        children=tasks[i : i + 8],
+                    )
+                    for i in range(0, len(tasks), 8)
+                ]
+            ),
+        )
     text = f"{assignment.title} {assignment.description}".lower()
     if any(word in text for word in ("implement", "code", "simulation", "program", "lab")):
         work = [
@@ -136,7 +172,7 @@ def fallback_tree(assignment: AssignmentModel) -> list[SubTaskNode]:
                 title=title,
                 estimated_minutes=30,
                 children=[
-                    _PlanNode(title=task, estimated_minutes=minutes, children=[])
+                    {"title": task, "estimated_minutes": minutes, "children": []}
                     for task, minutes in tasks
                 ],
             )
@@ -340,6 +376,10 @@ _RUBRIC_START = re.compile(r"(?<![A-Za-z0-9_])rubric\s*:", re.IGNORECASE)
 _RUBRIC_LINE = re.compile(
     r"([A-Za-z][A-Za-z0-9_\s'&/-]*?)\s*([0-9]+(?:\.[0-9]+)?)\s*%\s*(?:\(([^)]*)\))?"
 )
+_POINT_RUBRIC_LINE = re.compile(
+    r"^[ \t]*([^\n]+?)\s*\(([0-9]+(?:\.[0-9]+)?)\s+points?\)\s*:[ \t]*",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 
 def rubric_lines(description: str) -> list[tuple[str, float]]:
@@ -349,6 +389,32 @@ def rubric_lines(description: str) -> list[tuple[str, float]]:
         return []
     sentence = re.split(r"\.(?=\s|$)", description[start.end() :].lstrip())[0]
     return [(match[1].strip(), float(match[2])) for match in _RUBRIC_LINE.finditer(sentence)]
+
+
+def rubric_constraints(assignment: AssignmentModel) -> list[str]:
+    """Preserve Canvas criteria and their full requirements, highest point weight first."""
+    start = _RUBRIC_START.search(assignment.description)
+    if not start:
+        return []
+    text = assignment.description[start.end() :].lstrip()
+    matches = list(_POINT_RUBRIC_LINE.finditer(text))
+    if matches:
+        criteria = []
+        for i, match in enumerate(matches):
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+            criterion = " ".join(text[match.start() : end].split())
+            criteria.append((float(match[2]), criterion))
+        return [criterion for _, criterion in sorted(criteria, key=lambda item: -item[0])]
+    sentence = re.split(r"\.(?=\s|$)", text)[0]
+    criteria = []
+    for match in _RUBRIC_LINE.finditer(sentence):
+        percent = float(match[2])
+        points = math.floor(percent / 100 * assignment.points_possible * 10 + 0.5) / 10
+        criterion = f"{match[1].strip()} {percent:g}% ({points:g} pts)"
+        if match[3]:
+            criterion += f": {' '.join(match[3].split())}"
+        criteria.append((percent, criterion))
+    return [criterion for _, criterion in sorted(criteria, key=lambda item: -item[0])]
 
 
 def grade_floor(weight: float, current: float | None, target: float) -> float | None:
@@ -505,11 +571,7 @@ def ingest_step(
 ) -> tuple[AgentReasoningStep, list[str]]:
     """[01] Rubric constraints and point-weight risk; returns the constraints for the brief."""
     started = perf_counter()
-    parsed = [
-        f"{name} {percent:g}%"
-        f" ({math.floor(percent / 100 * assignment.points_possible * 10 + 0.5) / 10:g} pts)"
-        for name, percent in rubric_lines(assignment.description)
-    ]
+    parsed = rubric_constraints(assignment)
     audited = prefilter.constraints if prefilter else None
     constraints = audited or parsed
     floor = grade_floor(assignment.weight, context.current_score, context.target_score)

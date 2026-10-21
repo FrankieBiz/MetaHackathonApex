@@ -5,7 +5,12 @@ import httpx
 import pytest
 from openai import AsyncOpenAI
 
-from backend.ai_engine import deconstruct_assignment, fallback_tree, generate_study_recommendation
+from backend.ai_engine import (
+    _PlanNode,
+    deconstruct_assignment,
+    fallback_tree,
+    generate_study_recommendation,
+)
 from backend.canvas_client import get_mock_sandbox_data
 from backend.models import CourseModel, SubTaskNode, SubTaskUpdate
 from backend.tasks import patch_tree, walk
@@ -41,6 +46,8 @@ async def test_llama_valid_json_gets_server_owned_identifiers_and_hierarchy():
         assert body["response_format"] == {"type": "json_object"}
         assert "institutional academic triage agent" in body["messages"][0]["content"]
         assert "Rubric" in body["messages"][1]["content"]
+        assert "acceptance check" in body["messages"][0]["content"]
+        assert "rubric criterion" in body["messages"][0]["content"]
         return completion(
             json.dumps(
                 {
@@ -72,6 +79,28 @@ async def test_llama_valid_json_gets_server_owned_identifiers_and_hierarchy():
     assert all(node.actual_minutes == 0 and not node.is_completed for node in walk(nodes))
 
 
+def test_plan_node_schema_has_no_recursive_references():
+    assert "$ref" not in json.dumps(_PlanNode.model_json_schema())
+
+
+def test_fallback_microtasks_cover_point_criteria_with_acceptance_checks():
+    assignment = (
+        get_mock_sandbox_data()
+        .assignments[0]
+        .model_copy(
+            update={
+                "description": "Rubric:\nAnalysis (40 points): Compare two failure cases.\n"
+                "Evidence (60 points): Cite three primary sources.",
+            }
+        )
+    )
+    leaves = [node for node in walk(fallback_tree(assignment)) if not node.children]
+    assert "Evidence" in leaves[0].title
+    assert "Cite three primary sources." in leaves[0].title
+    assert "Analysis" in leaves[1].title
+    assert all("done when" in node.title.lower() for node in leaves)
+
+
 @pytest.mark.parametrize(
     "content,reason",
     [
@@ -82,6 +111,41 @@ async def test_llama_valid_json_gets_server_owned_identifiers_and_hierarchy():
         ('{"subtasks":[{"title":"Bad","estimated_minutes":"30","children":[]}]}', "stop"),
         ('{"subtasks":[{"title":" ","estimated_minutes":30,"children":[]}]}', "stop"),
         ('{"subtasks":[{"title":"Bad","estimated_minutes":30,"children":[],"id":"x"}]}', "stop"),
+        (
+            json.dumps(
+                {
+                    "subtasks": [
+                        {
+                            "title": "Parent",
+                            "estimated_minutes": 30,
+                            "children": [{"title": "Invalid child", "estimated_minutes": 5}],
+                        }
+                    ]
+                }
+            ),
+            "stop",
+        ),
+        (
+            json.dumps(
+                {
+                    "subtasks": [
+                        {
+                            "title": "Parent",
+                            "estimated_minutes": 30,
+                            "children": [
+                                {
+                                    "title": "Invalid child",
+                                    "estimated_minutes": 30,
+                                    "children": [],
+                                    "id": "untrusted-id",
+                                }
+                            ],
+                        }
+                    ]
+                }
+            ),
+            "stop",
+        ),
         ('{"subtasks":[{"title":"Valid","estimated_minutes":30,"children":[]}]}', "length"),
         (None, "stop"),
     ],

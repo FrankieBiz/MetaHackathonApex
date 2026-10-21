@@ -50,8 +50,13 @@ class TerminalService:
         self._dirty: dict[bool, set[str]] = {True: set(), False: set()}
         self._state: TerminalState | None = None
 
-    async def state(self, *, force: bool = False) -> TerminalState:
+    async def state(
+        self, *, force: bool = False, canvas_settings: Settings | None = None
+    ) -> TerminalState:
         async with self._lock:
+            if canvas_settings is not None:
+                self.canvas.settings = canvas_settings
+                force = True
             await self._sync(force=force)
             assert self._state is not None
             self._recalculate(self._state)

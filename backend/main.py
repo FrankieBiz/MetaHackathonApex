@@ -8,6 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from openai import AsyncOpenAI
+from pydantic import AliasChoices, Field, SecretStr, field_validator
 
 from .ai_engine import generate_study_triage
 from .canvas_client import CanvasClient
@@ -17,6 +18,7 @@ from .models import (
     DecomposeRequest,
     DecomposeResponse,
     InferenceTelemetry,
+    StrictModel,
     StudyInsertRequest,
     StudyTriagePlan,
     StudyTriageRequest,
@@ -26,6 +28,30 @@ from .models import (
 )
 from .persistence import SupabaseStore
 from .service import TerminalService
+
+
+class _CanvasSyncBody(StrictModel):
+    canvas_api_token: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("canvas_api_token", "token")
+    )
+    canvas_api_url: str | None = Field(
+        default=None, validation_alias=AliasChoices("canvas_api_url", "base_url", "baseUrl")
+    )
+
+    @field_validator("canvas_api_token")
+    @classmethod
+    def nonempty_token(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None:
+            token = value.get_secret_value().strip()
+            if not token:
+                raise ValueError("Provide a nonempty Canvas token")
+            return SecretStr(token)
+        return value
+
+    @field_validator("canvas_api_url")
+    @classmethod
+    def canvas_origin(cls, value: str | None) -> str | None:
+        return Settings.canvas_origin(value) if value is not None else None
 
 
 def create_app(
@@ -94,6 +120,9 @@ def create_app(
 
     @app.exception_handler(RequestValidationError)
     async def invalid_input(request: Request, exc: RequestValidationError) -> JSONResponse:
+        if request.url.path in ("/api/sync", "/api/canvas/sync"):
+            # FastAPI's default validation detail includes the rejected input.
+            return JSONResponse(status_code=422, content={"detail": "Invalid Canvas sync body."})
         if request.url.path in ("/decompose", "/api/decompose"):
             return JSONResponse(
                 status_code=422,
@@ -148,8 +177,20 @@ def create_app(
         )
 
     @app.post("/api/sync", response_model=TerminalState)
-    async def sync(request: Request) -> TerminalState:
-        return await request.app.state.terminal.state(force=True)
+    @app.post("/api/canvas/sync", response_model=TerminalState)
+    async def sync(request: Request, body: _CanvasSyncBody | None = None) -> TerminalState:
+        terminal = request.app.state.terminal
+        canvas_settings = None
+        if body and body.canvas_api_token is not None:
+            canvas_settings = terminal.canvas.settings.model_copy(
+                update={
+                    "canvas_api_token": body.canvas_api_token,
+                    "canvas_api_url": body.canvas_api_url
+                    or terminal.canvas.settings.canvas_api_url,
+                    "demo_mode": False,
+                }
+            )
+        return await terminal.state(force=True, canvas_settings=canvas_settings)
 
     @app.post("/api/v1/triage/study", response_model=StudyTriagePlan)
     async def study_triage(body: StudyTriageRequest, request: Request) -> StudyTriagePlan:

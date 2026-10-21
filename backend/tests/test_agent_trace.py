@@ -169,7 +169,9 @@ async def test_agent_briefs_the_model_and_traces_four_grounded_steps():
         )
 
     brief = json.loads(requests[0]["messages"][1]["content"])["agent_brief"]
-    assert brief["rubric_constraints"][0] == "test harness 60% (90 pts)"
+    assert brief["rubric_constraints"][0] == (
+        "test harness 60% (90 pts): TestInitialElection3A, TestBasicAgree3B, TestPersist3C"
+    )
     assert brief["grade_floor_percent"] == 82.8
     assert brief["capacity"] == trace[1].summary
     assert [step.title for step in trace] == [
@@ -194,6 +196,33 @@ async def test_agent_briefs_the_model_and_traces_four_grounded_steps():
     assert verify.evidence[0].startswith(f"VELOCITY {velocity:.0f}% over ")
     assert nodes[0].title == "Pass the election tests"
     DecomposeResponse(subtasks=nodes, telemetry=telemetry, source="ai", agent_reasoning_trace=trace)
+
+
+async def test_canvas_point_rubric_details_survive_in_constraint_brief():
+    assignment = assignment_of(mock_state(), "cs3801-raft").model_copy(
+        update={
+            "subtasks": [],
+            "description": "Analyze a system.\nRubric:\n"
+            "Design & evidence (30.5 points): Explain the tradeoffs. Cite two sources.\n"
+            "Correctness (69.5 points): Pass all tests.\nInclude boundary cases.",
+        }
+    )
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return completion(PLAN)
+
+    http, client = mock_llm(handler)
+    async with http, client:
+        await run_triage_agent(
+            assignment, TriageContext(now=NOW), settings=settings(), client=client
+        )
+    brief = json.loads(requests[0]["messages"][1]["content"])["agent_brief"]
+    assert brief["rubric_constraints"] == [
+        "Correctness (69.5 points): Pass all tests. Include boundary cases.",
+        "Design & evidence (30.5 points): Explain the tradeoffs. Cite two sources.",
+    ]
 
 
 async def test_auditor_prefilter_constraints_lead_the_brief_and_fall_back_when_down():
@@ -234,7 +263,9 @@ async def test_auditor_prefilter_constraints_lead_the_brief_and_fall_back_when_d
             raft, context, settings=config, client=client, auditor=down
         )
     assert trace[0].engine == "rubric-parser"
-    assert trace[0].evidence[0] == "RUBRIC test harness 60% (90 pts)"
+    assert trace[0].evidence[0] == (
+        "RUBRIC test harness 60% (90 pts): TestInitialElection3A, TestBasicAgree3B, TestPersist3C"
+    )
     assert trace[0].evidence[-1].endswith("unavailable, rubric parser used")
 
 

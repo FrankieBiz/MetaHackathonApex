@@ -28,7 +28,7 @@ def completion(plan=PLAN, *, finish="stop"):
             "id": "study-fixture",
             "object": "chat.completion",
             "created": 1,
-            "model": "Llama-3.3-70B-Instruct",
+            "model": "muse-spark-1.3",
             "usage": {"prompt_tokens": 240, "completion_tokens": 100, "total_tokens": 340},
             "choices": [
                 {
@@ -128,7 +128,7 @@ def test_canvas_preserves_pdf_reference_and_actual_score():
 async def test_endpoint_calls_meta_with_context_returns_valid_plan_and_real_telemetry(monkeypatch):
     def handler(request):
         payload = json.loads(request.content)
-        assert payload["model"] == "Llama-3.3-70B-Instruct"
+        assert payload["model"] == "muse-spark-1.3"
         assert "untrusted" in payload["messages"][0]["content"]
         context = json.loads(payload["messages"][1]["content"])
         assert context["recent_assignments"][0]["score"] == 12
@@ -158,7 +158,7 @@ async def test_endpoint_calls_meta_with_context_returns_valid_plan_and_real_tele
         assert result["focus_topics"] == PLAN["focus_topics"]
         assert result["recommended_blocks"] == PLAN["recommended_blocks"]
         assert result["inference_telemetry"] == {
-            "model_used": "Llama-3.3-70B-Instruct",
+            "model_used": "muse-spark-1.3",
             "latency_ms": 500,
             "prompt_tokens": 240,
             "completion_tokens": 100,

@@ -14,21 +14,21 @@ from .conftest import settings
 async def test_meta_defaults_custom_endpoint_and_measured_usage(monkeypatch):
     config = Settings(meta_api_key="test-fixture", meta_base_url="https://meta.example/v1")
     assert config.inference_base_url == "https://meta.example/v1"
-    assert config.inference_model == "Llama-3.3-70B-Instruct"
+    assert config.inference_model == "muse-spark-1.3"
     assert Settings(meta_api_key="fixture", meta_model="Llama-3.1-8B-Instruct").inference_model == (
         "Llama-3.1-8B-Instruct"
     )
-    assert Settings(meta_api_key="fixture").inference_base_url == "https://api.llama.com/compat/v1"
+    assert Settings(meta_api_key="fixture").inference_base_url == "https://api.meta.ai/v1"
 
     def handler(request):
-        assert json.loads(request.content)["model"] == "Llama-3.3-70B-Instruct"
+        assert json.loads(request.content)["model"] == "muse-spark-1.3"
         return httpx.Response(
             200,
             json={
                 "id": "fixture",
                 "object": "chat.completion",
                 "created": 1,
-                "model": "Llama-3.3-70B-Instruct",
+                "model": "muse-spark-1.3",
                 "usage": {"prompt_tokens": 240, "completion_tokens": 100, "total_tokens": 340},
                 "choices": [
                     {
@@ -70,7 +70,7 @@ async def test_meta_defaults_custom_endpoint_and_measured_usage(monkeypatch):
         )
     assert nodes[0].title == "Implement component"
     assert telemetry.model_dump() == {
-        "model_used": "Llama-3.3-70B-Instruct",
+        "model_used": "muse-spark-1.3",
         "latency_ms": 500,
         "prompt_tokens": 240,
         "completion_tokens": 100,

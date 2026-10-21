@@ -49,6 +49,66 @@ async def test_default_state_is_rich_sorted_and_cached(api, terminal):
     assert terminal.store.saves == 1
 
 
+@pytest.mark.parametrize("path", ["/api/sync", "/api/canvas/sync"])
+async def test_sync_accepts_canvas_token_body_and_keeps_credentials_private(path):
+    calls = []
+
+    def canvas_handler(request):
+        calls.append(request)
+        assert request.url.host == "canvas.example.edu"
+        assert request.headers["Authorization"] == "Bearer fixture-canvas-token"
+        return httpx.Response(200, json=[])
+
+    async with service_context(canvas_handler=canvas_handler) as service:
+        app = create_app(service=service)
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://test"
+            ) as client,
+        ):
+            assert (await client.get("/api/state")).json()["metrics"]["demo_mode"] is True
+            response = await client.post(
+                path,
+                json={
+                    "canvas_api_token": "fixture-canvas-token",
+                    "canvas_api_url": "https://canvas.example.edu/",
+                },
+            )
+            assert response.status_code == 200
+            assert response.json()["metrics"]["demo_mode"] is False
+            assert "fixture-canvas-token" not in response.text
+            assert calls
+            calls.clear()
+            # Later syncs use the credentials without needing them in the body again.
+            assert (await client.post(path, json={})).json()["metrics"]["demo_mode"] is False
+            assert calls
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"canvas_api_token": ""},
+        {"canvas_api_token": 123},
+        {"canvas_api_token": "fixture-canvas-token", "canvas_api_url": "http://canvas.example"},
+        {
+            "canvas_api_token": "fixture-canvas-token",
+            "canvas_api_url": "https://u:p@canvas.example",
+        },
+    ],
+)
+async def test_sync_rejects_invalid_credentials_without_echoing_tokens(api, payload):
+    response = await api.post("/api/canvas/sync", json=payload)
+    assert response.status_code == 422
+    assert "fixture-canvas-token" not in response.text
+
+
+async def test_canvas_sync_accepts_short_token_alias_and_environment_sync(api):
+    assert (await api.post("/api/canvas/sync")).status_code == 200
+    response = await api.post("/api/canvas/sync", json={"token": "fixture-canvas-token"})
+    assert response.status_code == 200
+
+
 async def test_decompose_returns_telemetry_and_preserves_triage_contract(api):
     response = await api.post("/decompose", json={"assignment_id": "math4102-queue"})
     assert response.status_code == 200
@@ -332,6 +392,7 @@ async def test_cors_and_openapi(api, terminal):
         "/api/engine",
         "/api/state",
         "/api/sync",
+        "/api/canvas/sync",
         "/api/triage/{assignment_id}",
         "/api/v1/subtasks/{subtask_id}",
         "/api/v1/triage/study",

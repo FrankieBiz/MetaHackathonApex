@@ -19,8 +19,8 @@ class Settings(BaseSettings):
     llm_api_key: SecretStr = SecretStr("ollama")
     llm_model: str = "llama3"
     meta_api_key: SecretStr = SecretStr("")
-    meta_base_url: str = "https://api.llama.com/compat/v1"
-    meta_model: str = "Llama-3.3-70B-Instruct"
+    meta_base_url: str = "https://api.meta.ai/v1"
+    meta_model: str = "muse-spark-1.3"
     # Optional fast pre-filter that audits rubric constraints before the primary plan.
     auditor_api_key: SecretStr = SecretStr("")
     auditor_base_url: str = "https://api.deepseek.com/v1"
