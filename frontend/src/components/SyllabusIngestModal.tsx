@@ -1,6 +1,12 @@
 "use client";
 
-import { useRef, useState, type DragEvent, type FormEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent,
+  type FormEvent,
+} from "react";
 import { create } from "zustand";
 import { Key, Spinner, useEscape, useRestoreFocus } from "@/components/ui";
 import { useNow } from "@/hooks/useNow";
@@ -15,6 +21,10 @@ import {
   formatBytes,
   type SyllabusFileKind,
 } from "@/lib/syllabus";
+import {
+  LOCAL_SYLLABUS_PRESETS,
+  type SyllabusPreset,
+} from "@/lib/syllabusPresets";
 import { isRemote, useTerminal } from "@/store/terminal";
 
 /** Opened from the top bar and the command palette. */
@@ -58,6 +68,53 @@ export function describeIngestError(error: unknown): string {
   }
 }
 
+/** Quick-load bar: one click puts a sample course book on the terminal, no files needed. */
+function SamplePresets({
+  presets,
+  loading,
+  onLoad,
+}: {
+  presets: SyllabusPreset[];
+  loading: string | null;
+  onLoad: (preset: SyllabusPreset) => void;
+}) {
+  return (
+    <section aria-labelledby="syllabus-samples" className="flex flex-col gap-1">
+      <h3
+        id="syllabus-samples"
+        className="flex justify-between text-[10px] tracking-wider text-ink-3 uppercase"
+      >
+        <span>Sample syllabi · 1-click load</span>
+        <span>No files needed</span>
+      </h3>
+      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+        {presets.map((preset) => (
+          <button
+            key={preset.id}
+            type="button"
+            onClick={() => onLoad(preset)}
+            aria-label={`Load ${preset.university} ${preset.course_code} ${preset.name} sample syllabus`}
+            className="group flex min-w-0 flex-col items-start gap-0.5 border border-line-strong px-2 py-1.5 text-left transition-colors duration-100 outline-none hover:border-accent hover:bg-hover focus-visible:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <span className="flex w-full items-center justify-between gap-1">
+              <span className="border border-accent/50 px-1 text-[9px] tracking-wider text-accent uppercase">
+                {preset.university}
+              </span>
+              {loading === preset.id && <Spinner />}
+            </span>
+            <span className="text-[12px] text-ink tabular-nums">
+              {preset.course_code}
+            </span>
+            <span className="w-full truncate text-[10px] text-ink-3 group-hover:text-ink-2">
+              {preset.name}
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 /** Seconds since it mounted, i.e. since the extraction started. */
 function Elapsed() {
   const [since] = useState(() => Date.now());
@@ -73,11 +130,25 @@ function IngestDialog({ onClose }: { onClose: () => void }) {
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [presets, setPresets] = useState<SyllabusPreset[]>(() => [
+    ...LOCAL_SYLLABUS_PRESETS,
+  ]);
+  const [loadingPreset, setLoadingPreset] = useState<SyllabusPreset | null>(
+    null,
+  );
   const picker = useRef<HTMLInputElement>(null);
   // dragenter/dragleave fire for every child crossed; count to know when the pointer truly left.
   const depth = useRef(0);
   useRestoreFocus();
   useEscape(onClose);
+
+  useEffect(() => {
+    let live = true;
+    void api.syllabusPresets().then((list) => live && setPresets(list));
+    return () => {
+      live = false;
+    };
+  }, []);
 
   const pasted = text.trim();
   const ready =
@@ -143,6 +214,30 @@ function IngestDialog({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const loadPreset = async (preset: SyllabusPreset) => {
+    if (busy) return;
+    setError(null);
+    setBusy(true);
+    setLoadingPreset(preset);
+    try {
+      const load = await api.loadSyllabusPreset(preset.id);
+      const terminal = useTerminal.getState();
+      if (load.source === "backend") {
+        await terminal.hydrateFromSyllabus(load.state);
+      } else {
+        terminal.hydrateLocalSyllabus(
+          load.state,
+          `backend unavailable: ${load.cause.message}`,
+        );
+      }
+      onClose();
+    } catch (failure) {
+      setError(describeIngestError(failure));
+      setBusy(false);
+      setLoadingPreset(null);
+    }
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 px-4 pt-[10vh]"
@@ -182,6 +277,11 @@ function IngestDialog({ onClose }: { onClose: () => void }) {
         </h2>
 
         <fieldset disabled={busy} className="flex flex-col gap-3 px-3 py-3">
+          <SamplePresets
+            presets={presets}
+            loading={loadingPreset?.id ?? null}
+            onLoad={(preset) => void loadPreset(preset)}
+          />
           {staged ? (
             <div className="flex items-center gap-3 border border-up/40 bg-up/5 px-2.5 py-2 text-[12px]">
               <span className="shrink-0 border border-up/50 px-1 text-[10px] text-up">
@@ -268,8 +368,10 @@ function IngestDialog({ onClose }: { onClose: () => void }) {
             >
               <Spinner />
               <span>
-                EXTRACTING {staged ? KIND_TAG[staged.kind] : "TEXT"} VIA{" "}
-                {API_BASE.replace(/^https?:\/\//, "")}
+                {loadingPreset
+                  ? `LOADING ${loadingPreset.university} ${loadingPreset.course_code} SAMPLE`
+                  : `EXTRACTING ${staged ? KIND_TAG[staged.kind] : "TEXT"}`}{" "}
+                VIA {API_BASE.replace(/^https?:\/\//, "")}
               </span>
               <span className="ml-auto text-ink-3 tabular-nums">
                 <Elapsed />
@@ -285,7 +387,7 @@ function IngestDialog({ onClose }: { onClose: () => void }) {
             <p className="text-[11px] text-ink-3">
               {pinned
                 ? "The simulation desk is pinned; a successful ingest returns the terminal to backend data."
-                : `The backend looks offline. Ingest needs it at ${API_BASE}; a successful extraction relinks the terminal.`}
+                : `The backend looks offline. Ingest needs it at ${API_BASE}; a successful extraction relinks the terminal. Sample syllabi still load locally.`}
             </p>
           )}
         </fieldset>
@@ -295,7 +397,7 @@ function IngestDialog({ onClose }: { onClose: () => void }) {
           <Key tone="accent" type="submit" disabled={busy}>
             {busy ? (
               <>
-                EXTRACTING&nbsp;
+                {loadingPreset ? "LOADING" : "EXTRACTING"}&nbsp;
                 <Spinner />
               </>
             ) : (

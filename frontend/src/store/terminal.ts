@@ -48,6 +48,7 @@ import {
 import { minutes } from "@/lib/format";
 import { createMockState } from "@/lib/mockData";
 import { reanchor } from "@/lib/sandbox";
+import { mergeSyllabusState } from "@/lib/syllabusPresets";
 import type {
   AgentReasoningStep,
   ConnectionMode,
@@ -191,6 +192,8 @@ interface TerminalStore {
   setTokenOpen: (open: boolean) => void;
   /** Puts the backend's post-ingest state on screen and focuses the extracted course. */
   hydrateFromSyllabus: (state: TerminalState) => Promise<void>;
+  /** Merges a locally built course book (an offline sample syllabus) into the book on screen. */
+  hydrateLocalSyllabus: (state: TerminalState, reason: string) => void;
 }
 
 const isRemote = (mode: ConnectionMode) =>
@@ -1128,6 +1131,26 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
             ? `${added.map((c) => c.course_code).join(", ")} added`
             : "existing courses updated"
         } · ${data?.courses.length ?? 0} courses, ${data?.assignments.length ?? 0} assignments on the book.`,
+      );
+    },
+
+    hydrateLocalSyllabus: (incoming, reason) => {
+      const base = get().data ?? createMockState(Date.now());
+      const known = new Set(base.courses.map((c) => c.id));
+      const next = mergeSyllabusState(base, incoming);
+      commit(next);
+      const focus = incoming.courses[0];
+      if (focus) get().selectCourse(focus.id);
+      playFill();
+      const codes = incoming.courses.map((c) => c.course_code).join(", ");
+      const remote = isRemote(get().mode);
+      log(
+        remote ? "warn" : "ok",
+        `SYS // SAMPLE SYLLABUS LOADED LOCALLY · ${codes} ${
+          incoming.courses.some((c) => !known.has(c.id)) ? "added" : "refreshed"
+        } · ${next.courses.length} courses, ${next.assignments.length} assignments on the book (${reason}${
+          remote ? "; replaced by the next backend sync" : ""
+        }).`,
       );
     },
   };

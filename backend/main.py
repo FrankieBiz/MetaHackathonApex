@@ -30,6 +30,7 @@ from .models import (
 )
 from .persistence import SupabaseStore
 from .service import TerminalService
+from .syllabus_presets import SyllabusPresetDescriptor, list_presets
 
 
 class _CanvasSyncBody(StrictModel):
@@ -201,6 +202,17 @@ def create_app(
         return await generate_study_triage(
             body, settings=config, client=request.app.state.terminal.llm
         )
+
+    @app.get("/api/v1/syllabus/presets", response_model=list[SyllabusPresetDescriptor])
+    async def syllabus_presets() -> list[SyllabusPresetDescriptor]:
+        return list_presets()
+
+    @app.post("/api/v1/syllabus/presets/{preset_id}/load", response_model=TerminalState)
+    async def load_syllabus_preset(preset_id: str, request: Request) -> TerminalState:
+        try:
+            return await request.app.state.terminal.load_syllabus_preset(preset_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Syllabus preset not found") from exc
 
     @app.post("/api/v1/syllabus/ingest", response_model=TerminalState)
     @app.post("/api/v1/ingest/syllabus", response_model=TerminalState)

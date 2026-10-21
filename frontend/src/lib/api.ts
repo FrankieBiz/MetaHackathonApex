@@ -3,6 +3,11 @@
 
 import { z } from "zod";
 import { createMockState } from "@/lib/mockData";
+import {
+  LOCAL_SYLLABUS_PRESETS,
+  presetState,
+  type SyllabusPreset,
+} from "@/lib/syllabusPresets";
 import { useInference, type InferenceTelemetry } from "@/store/inference";
 import type {
   AgentReasoningStep,
@@ -566,6 +571,83 @@ export interface SyllabusIngestInput {
   file?: SyllabusFile;
 }
 
+// ------------------------------------------------------- syllabus presets
+
+/** Preset lists slower than this fall back to the bundled copies. */
+const PRESET_LIST_DEADLINE_MS = 2500;
+
+const RawPreset = z.object({
+  id: z.string().min(1),
+  university: z.enum(["MIT", "Stanford", "Harvard", "Columbia"]),
+  course_code: z.string().min(1),
+  name: z.string().catch(""),
+  term: z.string().catch(""),
+  description: z.string().catch(""),
+});
+
+/**
+ * The quick-load presets: the backend's list when it answers, else the bundled
+ * copies. Backend entries keep their local deliverables so they still load offline.
+ */
+export async function getSyllabusPresets(): Promise<SyllabusPreset[]> {
+  try {
+    const raw = await request(
+      "/api/v1/syllabus/presets",
+      {},
+      PRESET_LIST_DEADLINE_MS,
+    );
+    const remote = each(
+      RawPreset,
+      Array.isArray(raw) ? raw : (raw as { presets?: unknown } | null)?.presets,
+    );
+    if (!remote.length) return [...LOCAL_SYLLABUS_PRESETS];
+    const local = new Map(LOCAL_SYLLABUS_PRESETS.map((p) => [p.id, p]));
+    return remote.map((p) => ({ ...local.get(p.id), ...p }));
+  } catch {
+    return [...LOCAL_SYLLABUS_PRESETS];
+  }
+}
+
+/**
+ * A preset load. Like a feed read it never rejects for a bundled preset: an
+ * unreachable, slow, or failing backend yields the locally built course book,
+ * flagged `local` with the cause attached.
+ */
+export type PresetLoad =
+  | { source: "backend"; preset: SyllabusPreset | null; state: TerminalState }
+  | {
+      source: "local";
+      preset: SyllabusPreset;
+      state: TerminalState;
+      cause: ApiError;
+    };
+
+export async function loadSyllabusPreset(id: string): Promise<PresetLoad> {
+  const preset = LOCAL_SYLLABUS_PRESETS.find((p) => p.id === id) ?? null;
+  try {
+    const state = normalizeState(
+      await request(
+        `/api/v1/syllabus/presets/${encodeURIComponent(id)}/load`,
+        { method: "POST" },
+        15_000,
+      ),
+    );
+    return { source: "backend", preset, state };
+  } catch (error) {
+    // A preset only the backend knows has no local copy to fall back on.
+    if (!preset) throw error;
+    return {
+      source: "local",
+      preset,
+      state: presetState(preset, Date.now()),
+      cause:
+        error instanceof ApiError
+          ? error
+          : new ApiError((error as Error).message, "parse"),
+    };
+  }
+}
+
 export const api = {
   state: () => intercept(readState),
 
@@ -671,6 +753,9 @@ export const api = {
       ),
     );
   },
+
+  syllabusPresets: getSyllabusPresets,
+  loadSyllabusPreset,
 
   patchSubtask: (
     subtaskId: string,

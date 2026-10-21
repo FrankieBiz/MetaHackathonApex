@@ -29,6 +29,7 @@ from .models import (
     StudyInsertRequest,
     SubTaskNode,
     SubTaskUpdate,
+    SyllabusExtraction,
     SyllabusIngestRequest,
     TerminalMetrics,
     TerminalState,
@@ -385,10 +386,28 @@ class TerminalService:
         extracted = await extract_syllabus(
             request, settings=self.settings, client=self.llm, auditor=self.auditor
         )
+        return await self._ingest_extraction(extracted, request, expected_source=source)
+
+    async def load_syllabus_preset(self, preset_id: str) -> TerminalState:
+        from .syllabus_presets import get_preset
+
+        preset = get_preset(preset_id)
+        return await self._ingest_extraction(
+            preset.extraction, SyllabusIngestRequest(raw_text=preset.syllabus_text)
+        )
+
+    async def _ingest_extraction(
+        self,
+        extracted: SyllabusExtraction,
+        request: SyllabusIngestRequest,
+        *,
+        expected_source: bool | None = None,
+    ) -> TerminalState:
         async with self._lock:
             await self._sync()
             assert self._state is not None
-            if self._state.metrics.demo_mode != source:
+            source = self._state.metrics.demo_mode
+            if expected_source is not None and source != expected_source:
                 raise RuntimeError("Workspace changed during ingestion; retry with current state")
             code = " ".join(extracted.course.course_code.split())
             course = next(
