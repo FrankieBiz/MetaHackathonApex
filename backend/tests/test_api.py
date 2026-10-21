@@ -398,6 +398,7 @@ async def test_cors_and_openapi(api, terminal):
         "/api/v1/triage/study",
         "/api/v1/triage/study/insert",
         "/api/v1/simulate/monte-carlo",
+        "/api/v1/portfolio/report",
         "/api/v1/triage/{assignment_id}/stream",
         "/api/v1/syllabus/ingest",
         "/api/v1/syllabus/presets",

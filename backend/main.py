@@ -29,7 +29,13 @@ from .models import (
     TerminalState,
 )
 from .persistence import SupabaseStore
-from .service import MonteCarloRequest, MonteCarloResponse, TerminalService
+from .service import (
+    MonteCarloRequest,
+    MonteCarloResponse,
+    PortfolioReportRequest,
+    PortfolioReportResponse,
+    TerminalService,
+)
 from .syllabus_presets import SyllabusPresetDescriptor, list_presets
 
 
@@ -209,6 +215,12 @@ def create_app(
             return await request.app.state.terminal.monte_carlo(body)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post("/api/v1/portfolio/report", response_model=PortfolioReportResponse)
+    async def portfolio_report(
+        request: Request, body: PortfolioReportRequest | None = None
+    ) -> PortfolioReportResponse:
+        return await request.app.state.terminal.portfolio_report()
 
     @app.get("/api/v1/syllabus/presets", response_model=list[SyllabusPresetDescriptor])
     async def syllabus_presets() -> list[SyllabusPresetDescriptor]:
