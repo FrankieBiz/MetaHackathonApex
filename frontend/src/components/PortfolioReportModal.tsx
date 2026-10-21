@@ -189,6 +189,8 @@ function AuditMetrics({ report }: { report: PortfolioReport }) {
   const margin = report.margin;
   // With no posted grade the backend reports zero placeholders for the book.
   const graded = report.course_breakdown.some((c) => c.current_score !== null);
+  // Priority is the raw §4.1 score; bars read relative to the most urgent action.
+  const topPriority = Math.max(0, ...report.high_leverage_actions.map((a) => a.priority_score));
   return (
     <div className="flex flex-col gap-3">
       <dl className="grid grid-cols-2 border border-line sm:grid-cols-5">
@@ -316,7 +318,9 @@ function AuditMetrics({ report }: { report: PortfolioReport }) {
                       <div aria-hidden className="h-[3px] w-10 bg-line">
                         <div
                           className="h-full bg-accent"
-                          style={{ width: `${Math.min(1, Math.max(0, a.priority_score)) * 100}%` }}
+                          style={{
+                            width: `${topPriority > 0 ? Math.max(0, a.priority_score / topPriority) * 100 : 0}%`,
+                          }}
                         />
                       </div>
                       <span className="text-ink">{a.priority_score.toFixed(2)}</span>
