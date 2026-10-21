@@ -336,6 +336,207 @@ export interface TriageResult {
   trace: AgentReasoningStep[] | null;
 }
 
+/** A model call can run long; past this the terminal gives up on the planner. */
+const TRIAGE_DEADLINE_MS = 90_000;
+
+const Decomposed = z.object({
+  source: z.enum(["ai", "local", "cached"]),
+  telemetry: z.object({
+    model_used: z.string(),
+    latency_ms: z.number().finite().nonnegative(),
+    // Usage the provider didn't report is unmeasured, never zero.
+    prompt_tokens: z.number().int().nonnegative().nullable().catch(null),
+    completion_tokens: z.number().int().nonnegative().nullable().catch(null),
+    tokens_per_sec: z.number().finite().nonnegative().nullable().catch(null),
+  }),
+  // A backend without the agent (or a malformed trace) leaves the terminal to build one.
+  agent_reasoning_trace: z.array(TraceStep).length(4).nullable().catch(null),
+});
+
+/** A `DecomposeResponse`, from POST /api/decompose or the stream's final event. */
+function decomposed(raw: unknown, assignmentId: string): TriageResult {
+  const result = Decomposed.parse(raw);
+  const subtasks = normalizeTriage(raw, assignmentId);
+  useInference.getState().finish(result.telemetry, result.source);
+  return {
+    subtasks,
+    source: result.source,
+    telemetry: result.telemetry,
+    trace: result.agent_reasoning_trace ?? null,
+  };
+}
+
+// ---------------------------------------------------------- triage stream
+
+/** What the agent emits while it works, in the order it happened. */
+export type TriageStreamEvent =
+  | { type: "log"; message: string }
+  | { type: "tool_call"; name: string; arguments: unknown; result: unknown }
+  | { type: "token"; text: string }
+  | { type: "step"; step: AgentReasoningStep };
+
+/** The backend answered the stream with an in-band `error` event: the agent itself failed. */
+export class TriageStreamError extends ApiError {
+  constructor(detail: string) {
+    super(detail, "http");
+    this.name = "TriageStreamError";
+  }
+}
+
+export const triageStreamPath = (assignmentId: string) =>
+  `/api/v1/triage/${encodeURIComponent(assignmentId)}/stream`;
+
+/** Splits a server-sent event stream into `{ event, data }` frames. */
+export async function* sseFrames(
+  body: ReadableStream<Uint8Array>,
+): AsyncGenerator<{ event: string | null; data: string }> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const frame = (block: string) => {
+    let event: string | null = null;
+    const data: string[] = [];
+    for (const line of block.split(/\r\n|\r|\n/)) {
+      if (!line || line.startsWith(":")) continue;
+      const colon = line.indexOf(":");
+      const field = colon < 0 ? line : line.slice(0, colon);
+      const value = colon < 0 ? "" : line.slice(colon + 1).replace(/^ /, "");
+      if (field === "event") event = value;
+      else if (field === "data") data.push(value);
+    }
+    return data.length ? { event, data: data.join("\n") } : null;
+  };
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      const blocks = buffer.split(/\r\n\r\n|\n\n|\r\r/);
+      buffer = done ? "" : blocks.pop()!;
+      for (const block of blocks) {
+        const parsed = frame(block);
+        if (parsed) yield parsed;
+      }
+      if (done) return;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+const text = (value: unknown) => (typeof value === "string" ? value : "");
+
+/**
+ * Runs triage over GET /api/v1/triage/{id}/stream, handing every live event
+ * to `onEvent` as it lands and resolving with the final plan. Each frame is
+ * named by its `event:` line or a JSON `type` field. Rejects with
+ * TriageStreamError when the agent reports a failure, and with a plain
+ * ApiError when the stream itself is unavailable (callers fall back to
+ * POST /api/decompose).
+ */
+export async function streamTriage(
+  assignmentId: string,
+  onEvent: (event: TriageStreamEvent) => void,
+  { signal }: { signal?: AbortSignal } = {},
+): Promise<TriageResult> {
+  const path = triageStreamPath(assignmentId);
+  const deadline = AbortSignal.timeout(TRIAGE_DEADLINE_MS);
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  deadline.addEventListener("abort", abort);
+  signal?.addEventListener("abort", abort);
+  const fail = (error: unknown): never => {
+    if (error instanceof ApiError) throw error;
+    if (signal?.aborted) throw new ApiError("Triage stream cancelled", "parse");
+    if (deadline.aborted) {
+      throw new ApiError(
+        `No plan from ${API_BASE} within ${TRIAGE_DEADLINE_MS / 1000}s`,
+        "timeout",
+      );
+    }
+    // fetch and body reads fail with TypeError; anything else is a bad payload.
+    throw error instanceof TypeError
+      ? new ApiError(`Cannot reach ${API_BASE}`, "network")
+      : new ApiError(`${path} sent a malformed plan`, "parse");
+  };
+
+  try {
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE}${path}`, {
+        cache: "no-store",
+        headers: { Accept: "text/event-stream" },
+        signal: controller.signal,
+      });
+    } catch (error) {
+      return fail(error);
+    }
+    if (!response.ok) {
+      throw new ApiError(`HTTP ${response.status}`, "http", response.status);
+    }
+    if (
+      !response.body ||
+      !response.headers.get("content-type")?.includes("text/event-stream")
+    ) {
+      throw new ApiError(`${path} did not answer with a stream`, "parse");
+    }
+
+    try {
+      for await (const { event, data } of sseFrames(response.body)) {
+        let payload: unknown;
+        try {
+          payload = JSON.parse(data);
+        } catch {
+          payload = data;
+        }
+        const body = (
+          payload && typeof payload === "object" ? payload : {}
+        ) as Record<string, unknown>;
+        switch (event ?? text(body.type)) {
+          case "log": {
+            const message = text(body.message) || text(payload);
+            if (message) onEvent({ type: "log", message });
+            break;
+          }
+          case "tool_call":
+            onEvent({
+              type: "tool_call",
+              name: text(body.name) || "tool",
+              arguments: body.arguments ?? null,
+              result: body.result ?? null,
+            });
+            break;
+          case "token": {
+            const token = text(body.text) || text(payload);
+            if (token) onEvent({ type: "token", text: token });
+            break;
+          }
+          case "step": {
+            // The step itself, or wrapped as { step: {...} }.
+            const step = TraceStep.safeParse(
+              typeof body.step === "object" ? body.step : payload,
+            );
+            if (step.success) onEvent({ type: "step", step: step.data });
+            break;
+          }
+          case "done":
+          case "complete":
+            return decomposed(payload, assignmentId);
+          case "error":
+            throw new TriageStreamError(
+              text(body.detail) || text(payload) || "Agent failed",
+            );
+        }
+      }
+    } catch (error) {
+      return fail(error);
+    }
+    throw new ApiError(`${path} ended before the plan arrived`, "parse");
+  } finally {
+    deadline.removeEventListener("abort", abort);
+    signal?.removeEventListener("abort", abort);
+  }
+}
+
 const StudyPlan = z.object({
   course_id: z.string().min(1),
   detected_triggers: z.array(z.string()),
@@ -431,42 +632,20 @@ export const api = {
     ),
 
   // The measured endpoint returns the same tree plus inference usage and the agent trace.
-  triage: async (assignmentId: string): Promise<TriageResult> => {
-    const raw = await request(
-      "/api/decompose",
-      {
-        method: "POST",
-        body: JSON.stringify({ assignment_id: assignmentId }),
-      },
-      90_000,
-    );
-    const result = z
-      .object({
-        source: z.enum(["ai", "local", "cached"]),
-        telemetry: z.object({
-          model_used: z.string(),
-          latency_ms: z.number().finite().nonnegative(),
-          prompt_tokens: z.number().int().nonnegative().nullable(),
-          completion_tokens: z.number().int().nonnegative().nullable(),
-          tokens_per_sec: z.number().finite().nonnegative().nullable(),
-        }),
-        // A backend without the agent (or a malformed trace) leaves the terminal to build one.
-        agent_reasoning_trace: z
-          .array(TraceStep)
-          .length(4)
-          .nullable()
-          .catch(null),
-      })
-      .parse(raw);
-    const subtasks = normalizeTriage(raw, assignmentId);
-    useInference.getState().finish(result.telemetry, result.source);
-    return {
-      subtasks,
-      source: result.source,
-      telemetry: result.telemetry,
-      trace: result.agent_reasoning_trace ?? null,
-    };
-  },
+  triage: async (assignmentId: string): Promise<TriageResult> =>
+    decomposed(
+      await request(
+        "/api/decompose",
+        {
+          method: "POST",
+          body: JSON.stringify({ assignment_id: assignmentId }),
+        },
+        TRIAGE_DEADLINE_MS,
+      ),
+      assignmentId,
+    ),
+
+  streamTriage,
 
   /** Extracts courses, weights, and deliverables from a syllabus; answers with the updated state. */
   ingestSyllabus: async ({

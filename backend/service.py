@@ -1,6 +1,7 @@
 """Serialize state changes and preserve progress across cache refreshes."""
 
 import asyncio
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from statistics import pstdev
 from uuid import NAMESPACE_URL, uuid5
@@ -13,6 +14,7 @@ from .ai_engine import (
     generate_study_recommendation,
     run_triage_agent,
     saved_plan_trace,
+    stream_triage,
     task_id,
     triage_context,
 )
@@ -22,6 +24,7 @@ from .models import (
     AgentReasoningStep,
     AssignmentModel,
     CourseModel,
+    DecomposeResponse,
     InferenceTelemetry,
     StudyInsertRequest,
     SubTaskNode,
@@ -264,6 +267,58 @@ class TerminalService:
         )
         if trace is not None:
             trace[:] = steps
+        return await self._commit_triage(
+            assignment_id, source, material, nodes, telemetry=telemetry, trace=trace
+        )
+
+    async def stream_triage(self, assignment_id: str) -> AsyncIterator[dict]:
+        """Emit progress outside the lock; save and resolve races before complete."""
+        async with self._lock:
+            await self._sync()
+            assert self._state is not None
+            assignment = next((a for a in self._state.assignments if a.id == assignment_id), None)
+            if assignment is None:
+                raise KeyError(assignment_id)
+            context = triage_context(self._state, assignment, datetime.now(UTC))
+            source = self._state.metrics.demo_mode
+            material = (assignment.title, assignment.description)
+            request_assignment = assignment.model_copy(deep=True)
+        events = stream_triage(
+            request_assignment,
+            context,
+            settings=self.settings,
+            client=self.llm,
+            auditor=self.auditor,
+        )
+        try:
+            async for event in events:
+                if event["event"] == "complete":
+                    result = DecomposeResponse.model_validate(event["data"])
+                    result.subtasks = await self._commit_triage(
+                        assignment_id,
+                        source,
+                        material,
+                        result.subtasks,
+                        telemetry=result.telemetry,
+                        trace=result.agent_reasoning_trace,
+                    )
+                    if result.telemetry.model_used == "cached-plan":
+                        result.source = "cached"
+                    event = {"event": "complete", "data": result.model_dump(mode="json")}
+                yield event
+        finally:
+            await events.aclose()
+
+    async def _commit_triage(
+        self,
+        assignment_id: str,
+        source: bool,
+        material: tuple[str, str],
+        nodes: list[SubTaskNode],
+        *,
+        telemetry: InferenceTelemetry | None,
+        trace: list[AgentReasoningStep] | None,
+    ) -> list[SubTaskNode]:
         async with self._lock:
             assert self._state is not None
             assignment = next((a for a in self._state.assignments if a.id == assignment_id), None)

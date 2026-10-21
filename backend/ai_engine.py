@@ -6,6 +6,7 @@ import json
 import logging
 import math
 import re
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
@@ -22,6 +23,7 @@ from .models import (
     AgentReasoningStep,
     AssignmentModel,
     CourseModel,
+    DecomposeResponse,
     FocusTopics,
     InferenceTelemetry,
     StrictModel,
@@ -523,6 +525,47 @@ def grade_floor(weight: float, current: float | None, target: float) -> float | 
     return current - (current - target) * 100 / weight
 
 
+def get_portfolio_state(context: TriageContext) -> dict:
+    """Read the scoped portfolio snapshot without exposing credentials or other courses."""
+    return {
+        "current_score": context.current_score,
+        "target_score": context.target_score,
+        "margin": context.margin,
+        "open_budget_minutes": context.open_budget_minutes,
+        "completion_velocity_percent": context.velocity,
+    }
+
+
+def calculate_grade_floor(assignment: AssignmentModel, context: TriageContext) -> dict:
+    floor = grade_floor(assignment.weight, context.current_score, context.target_score)
+    return {
+        "grade_floor_percent": None if floor is None else round(floor, 1),
+        "risk_tier": risk_tier(assignment.weight, floor),
+    }
+
+
+async def audit_rubric_constraints(
+    assignment: AssignmentModel,
+    context: TriageContext,
+    *,
+    settings: Settings | None = None,
+    auditor: AsyncOpenAI | None = None,
+) -> dict:
+    step, constraints = ingest_step(
+        assignment, context, await _prefilter(assignment, settings or get_settings(), auditor)
+    )
+    return {"rubric_constraints": constraints, "step": step.model_dump(mode="json")}
+
+
+def check_capacity(assignment: AssignmentModel, context: TriageContext) -> dict:
+    return {
+        "queued_minutes": context.queued_minutes,
+        "open_budget_minutes": context.open_budget_minutes,
+        "hours_until_deadline": _hours_until(assignment, context.now),
+        "step": capacity_step(assignment, context).model_dump(mode="json"),
+    }
+
+
 def risk_tier(weight: float, floor: float | None) -> Literal["high", "medium", "low"]:
     if floor is None:
         return "high" if weight >= 20 else "medium" if weight >= 10 else "low"
@@ -875,6 +918,196 @@ async def run_triage_agent(
         ),
         verification_step(assignment, context, nodes),
     ]
+
+
+async def stream_triage(
+    assignment: AssignmentModel,
+    context: TriageContext,
+    *,
+    settings: Settings | None = None,
+    client: AsyncOpenAI | None = None,
+    auditor: AsyncOpenAI | None = None,
+    telemetry: InferenceTelemetry | None = None,
+) -> AsyncIterator[dict]:
+    """Stream explicit local tool results and model deltas, then a validated plan.
+
+    Tools run against the same immutable snapshot used by the synchronous agent.
+    Token events contain unvalidated model output; only complete contains usable tasks.
+    """
+    settings = settings or get_settings()
+    telemetry = telemetry if telemetry is not None else InferenceTelemetry()
+    saved = any(n.is_completed or n.actual_minutes for n in walk(assignment.subtasks))
+    arguments = {"assignment_id": assignment.id}
+    portfolio = get_portfolio_state(context)
+    yield {
+        "event": "tool_call",
+        "data": {
+            "name": "get_portfolio_state",
+            "arguments": arguments,
+            "result": portfolio,
+        },
+    }
+    floor = calculate_grade_floor(assignment, context)
+    yield {
+        "event": "tool_call",
+        "data": {
+            "name": "calculate_grade_floor",
+            "arguments": arguments,
+            "result": floor,
+        },
+    }
+    if saved:
+        ingest, constraints = ingest_step(assignment, context)
+        audit = {"rubric_constraints": constraints, "step": ingest.model_dump(mode="json")}
+    else:
+        audit = await audit_rubric_constraints(
+            assignment, context, settings=settings, auditor=auditor
+        )
+    yield {
+        "event": "tool_call",
+        "data": {
+            "name": "audit_rubric_constraints",
+            "arguments": arguments,
+            "result": audit,
+        },
+    }
+    yield {"event": "step", "data": audit["step"]}
+    capacity = check_capacity(assignment, context)
+    yield {
+        "event": "tool_call",
+        "data": {
+            "name": "check_capacity",
+            "arguments": arguments,
+            "result": capacity,
+        },
+    }
+    yield {"event": "step", "data": capacity["step"]}
+    rationale = None
+    if saved:
+        telemetry.model_used = "cached-plan"
+        nodes = [node.model_copy(deep=True) for node in assignment.subtasks]
+    else:
+        brief = {
+            "rubric_constraints": audit["rubric_constraints"],
+            "grade_floor_percent": floor["grade_floor_percent"],
+            "capacity": capacity["step"]["summary"],
+            "completion_velocity_percent": None
+            if context.velocity is None
+            else round(context.velocity),
+        }
+        owns_client = client is None
+        provider = client or AsyncOpenAI(
+            base_url=settings.inference_base_url,
+            api_key=settings.inference_api_key.get_secret_value(),
+            timeout=settings.llm_timeout_seconds,
+            max_retries=0,
+        )
+        telemetry.model_used = settings.inference_model
+        telemetry.prompt_tokens = telemetry.completion_tokens = telemetry.tokens_per_sec = None
+        started = perf_counter()
+        try:
+            async with asyncio.timeout(settings.llm_timeout_seconds):
+                response = await provider.chat.completions.create(
+                    model=settings.inference_model,
+                    temperature=0,
+                    max_tokens=3000,
+                    response_format={"type": "json_object"},
+                    stream=True,
+                    stream_options={"include_usage": True},
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {
+                            "role": "user",
+                            "content": json.dumps(
+                                {
+                                    "course": assignment.course_code,
+                                    "title": assignment.title,
+                                    "description_and_rubric": assignment.description[:20_000],
+                                    "agent_brief": brief,
+                                }
+                            ),
+                        },
+                    ],
+                )
+                content, finish = "", None
+                async with response:
+                    async for chunk in response:
+                        telemetry.model_used = chunk.model or settings.inference_model
+                        if chunk.usage:
+                            for field in ("prompt_tokens", "completion_tokens"):
+                                count = getattr(chunk.usage, field, None)
+                                setattr(
+                                    telemetry,
+                                    field,
+                                    count if type(count) is int and count >= 0 else None,
+                                )
+                        if not chunk.choices:
+                            continue
+                        choice = chunk.choices[0]
+                        if choice.finish_reason:
+                            finish = choice.finish_reason
+                        token = choice.delta.content
+                        if token:
+                            content += token
+                            if len(content) > 64_000:
+                                raise ValueError("Oversized task plan")
+                            yield {"event": "token", "data": {"text": token}}
+                if finish != "stop" or not content:
+                    raise ValueError("Incomplete task plan")
+                plan = _Plan.model_validate_json(content)
+                nodes = _materialize(assignment, plan)
+                rationale = " ".join((plan.sequencing_rationale or "").split())[:200] or None
+        except (
+            APIError,
+            ValueError,
+            TypeError,
+            IndexError,
+            AttributeError,
+            TimeoutError,
+            RecursionError,
+        ) as exc:
+            logger.warning("Streaming inference unavailable or invalid (%s)", type(exc).__name__)
+            telemetry.model_used = "local-starter-plan"
+            nodes = fallback_tree(assignment)
+        finally:
+            elapsed = perf_counter() - started
+            telemetry.latency_ms = round(elapsed * 1000)
+            telemetry.tokens_per_sec = (
+                round(telemetry.completion_tokens / elapsed, 1)
+                if telemetry.completion_tokens is not None and elapsed > 0
+                else None
+            )
+            if owns_client:
+                await provider.close()
+    trace = [
+        AgentReasoningStep.model_validate(audit["step"]),
+        AgentReasoningStep.model_validate(capacity["step"]),
+    ]
+    trace += [
+        critical_path_step(
+            nodes,
+            engine=telemetry.model_used,
+            latency_ms=telemetry.latency_ms,
+            rationale=rationale,
+            saved=saved,
+        ),
+        verification_step(assignment, context, nodes),
+    ]
+    for step in trace[2:]:
+        yield {"event": "step", "data": step.model_dump(mode="json")}
+    yield {
+        "event": "complete",
+        "data": DecomposeResponse(
+            subtasks=nodes,
+            telemetry=telemetry,
+            agent_reasoning_trace=trace,
+            source="cached"
+            if saved
+            else "local"
+            if telemetry.model_used == "local-starter-plan"
+            else "ai",
+        ).model_dump(mode="json"),
+    }
 
 
 def saved_plan_trace(

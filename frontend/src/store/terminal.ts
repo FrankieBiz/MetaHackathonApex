@@ -15,11 +15,15 @@
 import { create } from "zustand";
 import { useInference, type InferenceTelemetry } from "@/store/inference";
 import {
+  API_BASE,
   ApiError,
+  TriageStreamError,
   api,
   normalizeState,
+  triageStreamPath,
   type CanvasCredentials,
   type TriageResult,
+  type TriageStreamEvent,
 } from "@/lib/api";
 import {
   appendSnapshot,
@@ -62,17 +66,78 @@ const GRADES_KEY = "apex-terminal:grade-ledger:v1";
 /** Footer headline while the local sandbox runs; the cause stays one line down in the log. */
 export const SANDBOX_READY =
   "SYS // ISOLATED SANDBOX DESK ACTIVE · DETERMINISTIC ENGINE READY (CTRL+SHIFT+D TO TOGGLE LIVE API)";
-/** The execution deck streams its triage log this long before a tree mounts. */
+/**
+ * Plans that arrive all at once (POST /api/decompose, the local planner) hold
+ * the deck this long before a tree mounts. A live stream is never held.
+ */
 export const TRIAGE_STREAM_MS = 800;
-/** Then each agent reasoning step lands this far apart before the tree is revealed. */
+/** Then each of their reasoning steps lands this far apart before the tree is revealed. */
 export const TRACE_STEP_MS = 320;
+
+/** One line of the agent's live log. */
+export type AgentEvent =
+  | {
+      kind: "log";
+      text: string;
+      /** agent: the backend agent said it · terminal: this client's own transport notes. */
+      from: "agent" | "terminal";
+    }
+  | { kind: "tool"; name: string; args: string; result: string | null };
 
 export interface AgentTrace {
   steps: AgentReasoningStep[];
-  /** ai: the backend's model planned · local: a starter or offline plan · cached: a saved plan was kept. */
-  source: "ai" | "local" | "cached";
+  /** Log lines and tool calls in the order they happened. */
+  events: AgentEvent[];
+  /** Model output as it streamed in; empty when nothing streamed. */
+  tokens: string;
+  /** null while the run is in flight · ai: the backend's model planned · local: a starter or offline plan · cached: a saved plan was kept. */
+  source: "ai" | "local" | "cached" | null;
   /** Measured inference for the planning step; null when no model ran. */
   telemetry: InferenceTelemetry | null;
+}
+
+const brief = (value: unknown) =>
+  typeof value === "string" ? value : JSON.stringify(value);
+
+/** Folds one live stream event into the trace it belongs to. */
+export function applyTraceEvent(
+  trace: AgentTrace,
+  event: TriageStreamEvent,
+): AgentTrace {
+  switch (event.type) {
+    case "token":
+      return { ...trace, tokens: trace.tokens + event.text };
+    case "step":
+      // A step may be re-sent once it settles; the latest copy wins.
+      return {
+        ...trace,
+        steps: [
+          ...trace.steps.filter((step) => step.step !== event.step.step),
+          event.step,
+        ].sort((a, b) => a.step - b.step),
+      };
+    case "log":
+      return {
+        ...trace,
+        events: [
+          ...trace.events,
+          { kind: "log", text: event.message, from: "agent" },
+        ],
+      };
+    case "tool_call":
+      return {
+        ...trace,
+        events: [
+          ...trace.events,
+          {
+            kind: "tool",
+            name: event.name,
+            args: event.arguments === null ? "" : brief(event.arguments),
+            result: event.result === null ? null : brief(event.result),
+          },
+        ],
+      };
+  }
 }
 
 type Patch = { is_completed?: boolean; actual_minutes?: number };
@@ -774,47 +839,61 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
       useInference.getState().start();
       const started = Date.now();
       const version = datasetVersion;
-      set((s) => {
-        const traces = { ...s.traces };
-        delete traces[assignmentId];
-        return {
-          selectedId: assignmentId,
-          triaging: { ...s.triaging, [assignmentId]: started },
-          traces,
-        };
-      });
+      set((s) => ({
+        selectedId: assignmentId,
+        triaging: { ...s.triaging, [assignmentId]: started },
+        traces: {
+          ...s.traces,
+          [assignmentId]: {
+            steps: [],
+            events: [],
+            tokens: "",
+            source: null,
+            telemetry: null,
+          },
+        },
+      }));
+      /** Writes to this run's own live trace; a swapped dataset or a newer run is left alone. */
+      const live = (change: (trace: AgentTrace) => AgentTrace) =>
+        set((s) => {
+          const trace = s.traces[assignmentId];
+          if (
+            !trace ||
+            version !== datasetVersion ||
+            s.triaging[assignmentId] !== started
+          )
+            return {};
+          return { traces: { ...s.traces, [assignmentId]: change(trace) } };
+        });
+      const note = (text: string) =>
+        live((trace) => ({
+          ...trace,
+          events: [...trace.events, { kind: "log", text, from: "terminal" }],
+        }));
+      /** Ends the run; a trace that never finished goes with it. */
       const done = () =>
         set((s) => {
-          const next = { ...s.triaging };
-          delete next[assignmentId];
-          return { triaging: next };
+          const triaging = { ...s.triaging };
+          delete triaging[assignmentId];
+          if (s.traces[assignmentId]?.source !== null) return { triaging };
+          const traces = { ...s.traces };
+          delete traces[assignmentId];
+          return { triaging, traces };
         });
+      const failed = (error: unknown) => {
+        useInference.getState().finish(null, "unavailable");
+        // The backend is up; a local plan here could never be saved.
+        log(
+          "error",
+          `Llama-3 triage failed: ${message(error)}. Nothing changed.`,
+        );
+        done();
+      };
 
       let result: TriageResult | null = null;
-      if (isRemote(get().mode)) {
-        try {
-          result = await api.triage(assignmentId);
-        } catch (error) {
-          useInference.getState().finish(null, "unavailable");
-          if (!isNetwork(error)) {
-            // The backend is up; a local plan here could never be saved.
-            log(
-              "error",
-              `Llama-3 triage failed: ${message(error)}. Nothing changed.`,
-            );
-            done();
-            return;
-          }
-          goOffline(message(error));
-        }
-      }
-
-      const local = !result;
-      const planStarted = Date.now();
-      const subtasks = result?.subtasks ?? localTriage(assignment);
-      // Planner time only: not a failed round trip before it, nor the display delay after.
-      const planned = Date.now() - planStarted;
-      if (local) useInference.getState().finish(null, "local");
+      /** The plan arrived over the live stream, so its trace is already on screen. */
+      let streamed = false;
+      let local = false;
       /**
        * True when this plan no longer fits the screen: the dataset was swapped
        * (Ctrl+Shift+D, reset, reconnect) or the backend came back during a
@@ -837,13 +916,52 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
         done();
         return true;
       };
-      // Let the decomposition log play out; an instant swap reads as a glitch.
-      await wait(Math.max(0, TRIAGE_STREAM_MS - (Date.now() - started)));
+
+      if (isRemote(get().mode)) {
+        note(`GET ${API_BASE}${triageStreamPath(assignmentId)}`);
+        const cancel = new AbortController();
+        try {
+          result = await api.streamTriage(
+            assignmentId,
+            (event) => {
+              if (version !== datasetVersion) cancel.abort();
+              else live((trace) => applyTraceEvent(trace, event));
+            },
+            { signal: cancel.signal },
+          );
+          streamed = true;
+        } catch (error) {
+          if (stale()) return;
+          if (error instanceof TriageStreamError) return failed(error);
+          // No stream (an older backend, a proxy, a dropped connection): ask for the whole plan.
+          live((trace) => ({ ...trace, steps: [], tokens: "" }));
+          note(
+            `STREAM UNAVAILABLE (${message(error)}) · POST ${API_BASE}/api/decompose`,
+          );
+          try {
+            result = await api.triage(assignmentId);
+          } catch (error) {
+            if (!isNetwork(error)) return failed(error);
+            useInference.getState().finish(null, "unavailable");
+            goOffline(message(error));
+          }
+        }
+      }
+
+      local = !result;
+      if (local) note("BACKEND OFFLINE · LOCAL PLANNER ENGAGED");
+      const planStarted = Date.now();
+      const subtasks = result?.subtasks ?? localTriage(assignment);
+      // Planner time only: not a failed round trip before it, nor the display delay after.
+      const planned = Date.now() - planStarted;
+      if (local) useInference.getState().finish(null, "local");
       if (stale()) return;
 
-      // Stream the agent's four steps into the deck, then reveal the tree.
+      // The backend's trace, else the four steps that streamed, else one built here.
+      const streamedSteps = get().traces[assignmentId]?.steps ?? [];
       const steps =
         result?.trace ??
+        (streamed && streamedSteps.length === 4 ? streamedSteps : null) ??
         reasoningTrace(
           assignment,
           triageContext(get().data ?? data!, assignment, Date.now()),
@@ -855,18 +973,27 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
               }
             : { engine: "local-planner", latency_ms: planned },
         );
-      set((s) => ({
-        traces: {
-          ...s.traces,
-          [assignmentId]: {
-            steps,
-            source: result?.source ?? "local",
-            telemetry: result?.source === "ai" ? result.telemetry : null,
-          },
-        },
-      }));
-      await wait(TRACE_STEP_MS * steps.length);
-      if (stale()) return;
+      const finished = {
+        source: result?.source ?? "local",
+        telemetry: result?.source === "ai" ? result.telemetry : null,
+      } as const;
+      if (streamed) {
+        live((trace) => ({ ...trace, ...finished, steps }));
+      } else {
+        // A plan that arrived all at once plays its steps into the deck before the tree mounts;
+        // an instant swap reads as a glitch.
+        await wait(Math.max(0, TRIAGE_STREAM_MS - (Date.now() - started)));
+        if (stale()) return;
+        for (const index of steps.keys()) {
+          live((trace) => ({
+            ...trace,
+            ...finished,
+            steps: steps.slice(0, index + 1),
+          }));
+          await wait(TRACE_STEP_MS);
+        }
+        if (stale()) return;
+      }
 
       const current = get().data;
       if (current?.assignments.some((a) => a.id === assignmentId)) {

@@ -1,12 +1,13 @@
 """Run from the repository root: python -m uvicorn backend.main:app --port 8000."""
 
+import json
 from contextlib import asynccontextmanager, nullcontext
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from openai import AsyncOpenAI
 from pydantic import AliasChoices, Field, SecretStr, field_validator
 
@@ -221,6 +222,43 @@ def create_app(
             return await request.app.state.terminal.triage(assignment_id)
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get(
+        "/api/v1/triage/{assignment_id}/stream",
+        response_class=StreamingResponse,
+        responses={200: {"content": {"text/event-stream": {}}}},
+    )
+    async def triage_stream(assignment_id: str, request: Request) -> StreamingResponse:
+        events = request.app.state.terminal.stream_triage(assignment_id)
+        # Resolve missing assignments before response headers commit to HTTP 200.
+        first = await anext(events)
+
+        def encode(event: dict) -> str:
+            return f"event: {event['event']}\ndata: {json.dumps(event['data'])}\n\n"
+
+        async def body():
+            try:
+                yield encode(first)
+                async for event in events:
+                    yield encode(event)
+            except RuntimeError:
+                yield encode(
+                    {
+                        "event": "error",
+                        "data": {
+                            "detail": "Assignment changed during triage; refresh and retry.",
+                            "status": 409,
+                        },
+                    }
+                )
+            finally:
+                await events.aclose()
+
+        return StreamingResponse(
+            body(),
+            media_type="text/event-stream",
+            headers={"X-Accel-Buffering": "no", "Cache-Control": "no-store"},
+        )
 
     @app.patch("/api/v1/subtasks/{subtask_id}", response_model=TerminalState)
     @app.patch("/api/subtasks/{subtask_id}", response_model=TerminalState, deprecated=True)

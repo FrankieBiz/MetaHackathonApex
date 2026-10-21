@@ -1,14 +1,11 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useState } from "react";
 import { Key, Meter, Panel, Spinner, TRACE_STATUS } from "@/components/ui";
 import { useNow } from "@/hooks/useNow";
-import { API_BASE } from "@/lib/api";
 import { countdown, minutes, score } from "@/lib/format";
 import { priorityScore, rollup } from "@/lib/engine";
 import {
-  TRACE_STEP_MS,
-  TRIAGE_STREAM_MS,
   activeCourseOf,
   isRemote,
   useTerminal,
@@ -109,10 +106,20 @@ function TraceStepRow({
   );
 }
 
+/** The agent's step count (backend `AgentReasoningStep.step` runs 1-4). */
+const TRACE_STEPS = 4;
+
+/** The tail of the model's streamed output, one line, as it arrives. */
+function tokenTail(tokens: string) {
+  const flat = tokens.replace(/\s+/g, " ").trim();
+  return flat.length > 160 ? `…${flat.slice(-160)}` : flat;
+}
+
 /**
- * The triage agent's terminal log. While a run is in flight it plays the
- * request preamble with live latency; once the agent answers, its four
- * reasoning steps stream in before the store reveals the tree.
+ * The triage agent's terminal log, rendered straight from the store. While a
+ * run is in flight it shows the request, then every log line, tool call,
+ * settled reasoning step, and streamed token the moment it lands; once the
+ * plan arrives each step folds to its summary line.
  */
 function AgentTraceLog({
   assignment,
@@ -135,60 +142,9 @@ function AgentTraceLog({
   const running = startedAt !== undefined;
   // Only a reachable backend runs the Meta model; offline, the local planner builds the tree.
   const agent = remote ? "[META-AGENT]" : "[LOCAL-PLANNER]";
-  const lines = useMemo(
-    () => [
-      {
-        tag: ">",
-        text: `TRIAGE ${assignment.course_code} "${assignment.title}"`,
-      },
-      remote
-        ? { tag: ">", text: `POST ${API_BASE}/api/decompose` }
-        : { tag: ">", text: "BACKEND OFFLINE · LOCAL PLANNER ENGAGED" },
-      {
-        tag: ">",
-        text: `CONTEXT ${assignment.points_possible} PTS · ${assignment.weight.toFixed(1)}% WT${
-          assignment.due_at
-            ? ` · DUE IN ${countdown(Date.parse(assignment.due_at) - now)}`
-            : ""
-        }`,
-      },
-      { tag: agent, text: "Ingesting rubric and auditing point weights…" },
-      { tag: agent, text: "Checking capacity against margin and open budget…" },
-      {
-        tag: agent,
-        text: remote
-          ? "Sequencing the critical path with the Meta model…"
-          : "Sequencing the critical path…",
-      },
-    ],
-    // `now` only seeds the countdown line; the script must not restart every tick.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [assignment.id, remote],
-  );
-  const [shownLines, setShownLines] = useState(1);
-  useEffect(() => {
-    if (!running || shownLines >= lines.length) return;
-    // Every line lands inside the store's minimum stream window.
-    const timer = setTimeout(
-      () => setShownLines((n) => n + 1),
-      (TRIAGE_STREAM_MS - 100) / (lines.length - 1),
-    );
-    return () => clearTimeout(timer);
-  }, [running, shownLines, lines.length]);
-
-  const [shownSteps, setShownSteps] = useState(0);
-  const total = trace?.steps.length ?? 0;
-  useEffect(() => {
-    if (!running || shownSteps >= total) return;
-    // The store holds the tree back for TRACE_STEP_MS per step.
-    const timer = setTimeout(
-      () => setShownSteps((n) => n + 1),
-      shownSteps ? TRACE_STEP_MS : 0,
-    );
-    return () => clearTimeout(timer);
-  }, [running, shownSteps, total]);
-
-  const steps = trace?.steps.slice(0, running ? shownSteps : total) ?? [];
+  const steps = trace?.steps ?? [];
+  const events = trace?.events ?? [];
+  const tail = running && trace ? tokenTail(trace.tokens) : "";
   const flags = (["risk", "watch"] as const)
     .map((status) => ({
       status,
@@ -210,7 +166,7 @@ function AgentTraceLog({
         <span className="shrink-0 text-ink-3">{open ? "▾" : "▸"}</span>
         <span className="shrink-0 text-accent">Agent trace</span>
         <span className="shrink-0 text-ink-3">
-          {trace ? `${steps.length}/${total} steps` : "running"}
+          {steps.length}/{TRACE_STEPS} steps{running ? " · live" : ""}
         </span>
         {!running &&
           flags.map((flag) => (
@@ -222,9 +178,9 @@ function AgentTraceLog({
             </span>
           ))}
         <span className="ml-auto min-w-0 truncate text-right text-ink-3">
-          {trace ? (
+          {trace?.source ? (
             traceTelemetry(trace)
-          ) : startedAt === undefined ? null : remote ? (
+          ) : !running ? null : remote ? (
             <LiveLatency since={startedAt} />
           ) : (
             "LOCAL PLANNER · NO INFERENCE"
@@ -237,24 +193,59 @@ function AgentTraceLog({
           aria-live="polite"
           className={`px-2.5 pb-2 text-[12px] ${running ? "" : "max-h-48 overflow-y-auto"}`}
         >
-          {running &&
-            lines.slice(0, shownLines).map((line, index) => (
-              <div
-                key={index}
-                className={`log-line ${index === 0 ? "text-accent" : "text-ink-2"}`}
-              >
-                <span className={line.tag === ">" ? "" : "text-accent"}>
-                  {line.tag}
-                </span>{" "}
-                {line.text}
+          {running && (
+            <>
+              <div className="log-line text-accent">
+                {`> TRIAGE ${assignment.course_code} "${assignment.title}"`}
               </div>
-            ))}
+              <div className="log-line text-ink-2">
+                {">"} CONTEXT {assignment.points_possible} PTS ·{" "}
+                {assignment.weight.toFixed(1)}% WT
+                {assignment.due_at
+                  ? ` · DUE IN ${countdown(Date.parse(assignment.due_at) - now)}`
+                  : ""}
+              </div>
+              {events.map((event, index) =>
+                event.kind === "tool" ? (
+                  <div
+                    key={index}
+                    className="log-line truncate text-ink-2"
+                    title={[
+                      `${event.name}(${event.args})`,
+                      event.result ?? "",
+                    ].join("\n")}
+                  >
+                    <span className="text-accent">[TOOL]</span>{" "}
+                    <span className="text-ink">{event.name}</span>(
+                    {event.args})
+                    {event.result !== null && (
+                      <span className="text-ink-3"> → {event.result}</span>
+                    )}
+                  </div>
+                ) : (
+                  <div key={index} className="log-line text-ink-2">
+                    <span className={event.from === "agent" ? "text-accent" : ""}>
+                      {event.from === "agent" ? agent : ">"}
+                    </span>{" "}
+                    {event.text}
+                  </div>
+                ),
+              )}
+            </>
+          )}
           {steps.map((step) => (
             <TraceStepRow key={step.step} step={step} expanded={running} />
           ))}
           {running && (
-            <div className="mt-1 text-accent">
-              <Spinner /> <span className="caret">█</span>
+            <div className="mt-1 truncate text-accent">
+              <Spinner />{" "}
+              {tail && (
+                <span className="text-ink-2">
+                  <span className="sr-only">Model output: </span>
+                  {tail}
+                </span>
+              )}
+              <span className="caret">█</span>
             </div>
           )}
         </div>
@@ -652,8 +643,6 @@ export function TaskTree() {
 
         {(triaging || trace) && (
           <AgentTraceLog
-            // A fresh run (or its end) restarts the stream from the first line.
-            key={`${assignment.id}:${startedAt ?? "done"}`}
             assignment={assignment}
             remote={remote}
             now={now}

@@ -226,7 +226,7 @@ describe("terminal store against the backend", () => {
     expect(subtasks.map((n) => n.id)).toEqual([`${UNTRIAGED}-remote-1`]);
   });
 
-  it("streams the backend agent's trace before revealing the tree", async () => {
+  it("plays a /decompose trace into the store step by step before revealing the tree", async () => {
     const store = await loadStore();
     await store.getState().boot();
     const { TRIAGE_STREAM_MS, TRACE_STEP_MS } =
@@ -238,14 +238,17 @@ describe("terminal store against the backend", () => {
     const run = store.getState().triage(UNTRIAGED);
     expect(store.getState().triaging[UNTRIAGED]).toBeGreaterThan(0);
     await vi.advanceTimersByTimeAsync(TRIAGE_STREAM_MS);
-    // The trace is on screen; the tree waits for its four steps.
-    expect(store.getState().traces[UNTRIAGED]).toEqual({
-      steps: BACKEND_TRACE,
+    // No stream on this backend: the first step is on screen; the tree waits for all four.
+    expect(store.getState().traces[UNTRIAGED]).toMatchObject({
+      steps: BACKEND_TRACE.slice(0, 1),
       source: "ai",
       telemetry: expect.objectContaining({ tokens_per_sec: 200 }),
     });
     expect(tree()).toEqual([]);
-    await vi.advanceTimersByTimeAsync(TRACE_STEP_MS * 4);
+    await vi.advanceTimersByTimeAsync(TRACE_STEP_MS * 3);
+    expect(store.getState().traces[UNTRIAGED].steps).toEqual(BACKEND_TRACE);
+    expect(tree()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(TRACE_STEP_MS);
     await run;
     expect(tree()).toHaveLength(1);
     expect(store.getState().triaging).toEqual({});
