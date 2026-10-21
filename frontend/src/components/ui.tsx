@@ -11,10 +11,12 @@ export function Panel({
   title,
   actions,
   children,
+  footer,
 }: {
   title: string;
   actions?: ReactNode;
   children: ReactNode;
+  footer?: ReactNode;
 }) {
   return (
     <section
@@ -34,6 +36,7 @@ export function Panel({
       <div className="@container relative min-h-0 flex-1 overflow-auto">
         {children}
       </div>
+      {footer && <div className="@container shrink-0">{footer}</div>}
     </section>
   );
 }

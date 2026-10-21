@@ -130,7 +130,7 @@ function Swatch({ color, dash }: { color: string; dash?: string }) {
   );
 }
 
-/** `+4.2% BUFFER ABOVE 90.0% TARGET` or `−1.8% MARGIN DEFICIT [ WARNING ]`. */
+/** Signed margin against the course's configured target. */
 export function MarginOfSafety({
   margin,
   target,
@@ -149,14 +149,14 @@ export function MarginOfSafety({
   return (
     <span
       role="status"
+      title={`Margin against ${pct(target)} target`}
       className={`flex h-[22px] items-center gap-1.5 border px-1.5 text-[11px] whitespace-nowrap ${
         safe ? "border-up/40 text-up" : "border-down/70 bg-down/10 text-down"
       }`}
     >
       <span aria-hidden>{safe ? "▲" : "▼"}</span>
-      {safe
-        ? `${signed(margin)}% BUFFER ABOVE ${pct(target)} TARGET`
-        : `${signed(margin)}% MARGIN DEFICIT`}
+      {signed(margin)}% MARGIN
+      <span className="sr-only">against {pct(target)} target</span>
       {!safe && <span className="font-semibold">[ WARNING ]</span>}
     </span>
   );
@@ -197,6 +197,131 @@ function ScoreInput({
       />
       <span className="ml-0.5">%</span>
     </span>
+  );
+}
+
+/** Pinned to the equity panel so the selected outcome stays within reach. */
+export function WhatIfBar({
+  course,
+  assignments,
+  scenario,
+  selectedId,
+  onSelect,
+  onScore,
+  onReset,
+}: {
+  course: Course;
+  assignments: Assignment[];
+  scenario: Scenario;
+  selectedId: string | null;
+  onSelect: (assignmentId: string) => void;
+  onScore: (assignmentId: string, score: number) => void;
+  onReset: (assignmentIds: string[]) => void;
+}) {
+  const id = useId();
+  const open = simulatable(course.id, assignments);
+  const assignment = open.find((a) => a.id === selectedId) ?? open[0];
+  const current = course.current_score;
+  if (!assignment || current === null) {
+    return (
+      <div className="border-t border-line-strong bg-head px-2.5 py-2 text-[11px] text-ink-3">
+        SIMULATE GRADE OUTCOME // {course.course_code} ·{" "}
+        {current === null
+          ? "Awaiting first posted grade"
+          : "No ungraded weighted deliverables"}
+      </div>
+    );
+  }
+  const score = scenario[assignment.id] ?? current;
+  const unit = (value: number) => Math.min(1, Math.max(0, value / 100));
+
+  return (
+    <div
+      role="group"
+      aria-label="What-if grade margin simulator"
+      className="border-t border-line-strong bg-head px-2.5 py-1.5"
+    >
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[10px]">
+        <span className="shrink-0 tracking-wider text-accent">
+          SIMULATE GRADE OUTCOME //
+        </span>
+        <span className="shrink-0 text-ink">{course.course_code}</span>
+        <div className="flex min-w-0 basis-full items-center gap-2 @md:basis-0 @md:flex-1">
+          <select
+            aria-label={`Deliverable to simulate for ${course.course_code}`}
+            title={assignment.title}
+            value={assignment.id}
+            onChange={(event) => onSelect(event.target.value)}
+            className="h-[22px] min-w-0 flex-1 border border-line-strong bg-canvas px-1 text-[11px] text-ink"
+          >
+            {open.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.title} (WT {a.weight}%)
+              </option>
+            ))}
+          </select>
+          <span className="shrink-0 text-ink-3">WT {assignment.weight}%</span>
+        </div>
+      </div>
+      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+        <div className="flex min-w-0 basis-full items-center gap-2 @2xl:basis-1/3 @2xl:flex-1">
+          <span className="text-[10px] text-ink-3">0%</span>
+          <input
+            id={id}
+            type="range"
+            min={0}
+            max={100}
+            step={0.1}
+            value={score}
+            aria-label={`Hypothetical grade outcome for ${course.course_code} ${assignment.title}`}
+            aria-valuetext={`${score.toFixed(1)} percent`}
+            onChange={(event) =>
+              onScore(assignment.id, event.target.valueAsNumber)
+            }
+            className="whatif-range flex-1"
+            style={
+              {
+                "--hold": unit(current),
+                "--lo": unit(Math.min(score, current)),
+                "--hi": unit(Math.max(score, current)),
+                "--fill": score >= current ? UP : DOWN,
+              } as CSSProperties
+            }
+          />
+          <span className="text-[10px] text-ink-3">100%</span>
+          <ScoreInput
+            key={assignment.id}
+            value={score}
+            label={`Simulated outcome for ${assignment.title}, in percent`}
+            onChange={(next) => onScore(assignment.id, next)}
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-1">
+          {([
+            { value: 50, label: "50% CRASH", tone: "down" },
+            { value: 85, label: "85% BASE", tone: "default" },
+            { value: 98, label: "98% ALPHA", tone: "up" },
+          ] as const).map((preset) => (
+            <Key
+              key={preset.value}
+              tone={preset.tone}
+              active={scenario[assignment.id] === preset.value}
+              aria-pressed={scenario[assignment.id] === preset.value}
+              onClick={() => onScore(assignment.id, preset.value)}
+            >
+              {preset.label}
+            </Key>
+          ))}
+          <Key
+            onClick={() => onReset(open.map((a) => a.id))}
+            disabled={!open.some((a) => scenario[a.id] !== undefined)}
+            aria-label={`Reset simulated outcomes for ${course.course_code}`}
+          >
+            RESET
+          </Key>
+        </div>
+      </div>
+    </div>
   );
 }
 
