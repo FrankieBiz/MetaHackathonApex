@@ -13,6 +13,8 @@
 #   LLM_BASE_URL, LLM_API_KEY, LLM_MODEL
 #                                      any OpenAI-compatible Llama endpoint; without one, triage
 #                                      serves a deterministic plan
+#   META_API_KEY, META_MODEL           Meta Model API primary agent (takes priority over LLM_*)
+#   AUDITOR_API_KEY, AUDITOR_MODEL     optional fast rubric pre-filter, e.g. deepseek-flash
 #   SUPABASE_URL, SUPABASE_KEY         service-role persistence; apply backend/sql/schema.sql first
 # Full reference: backend/README.md#configuration
 services:

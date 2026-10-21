@@ -71,6 +71,19 @@ export interface TerminalState {
   metrics: TerminalMetrics;
 }
 
+/** One stage of the triage agent (backend `AgentReasoningStep`). */
+export interface AgentReasoningStep {
+  step: number;
+  title: string;
+  /** pass: inside every threshold · watch: one is close · risk: the grade buffer is exposed. */
+  status: "pass" | "watch" | "risk";
+  summary: string;
+  evidence: string[];
+  /** The model, or deterministic engine, that produced this step. */
+  engine: string;
+  latency_ms: number;
+}
+
 export interface StudyBlock {
   title: string;
   estimated_minutes: 25;

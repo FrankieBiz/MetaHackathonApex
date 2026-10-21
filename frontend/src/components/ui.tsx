@@ -207,6 +207,13 @@ export function Segmented<T extends string>({
   );
 }
 
+/** Agent reasoning step verdicts, shared by the execution deck and the inspector. */
+export const TRACE_STATUS = {
+  pass: { label: "OK", color: "text-up" },
+  watch: { label: "WATCH", color: "text-accent" },
+  risk: { label: "RISK", color: "text-down" },
+} as const;
+
 export const STATUS_COLOR = {
   up: "var(--color-up)",
   down: "var(--color-down)",

@@ -3,8 +3,9 @@
 
 import { z } from "zod";
 import { createMockState } from "@/lib/mockData";
-import { useInference } from "@/store/inference";
+import { useInference, type InferenceTelemetry } from "@/store/inference";
 import type {
+  AgentReasoningStep,
   Assignment,
   Course,
   SubTaskNode,
@@ -317,6 +318,23 @@ const Telemetry = z.object({
   tokens_per_sec: z.number().finite().nonnegative().nullable(),
 });
 
+const TraceStep = z.object({
+  step: z.number().int().min(1).max(4),
+  title: z.string(),
+  status: z.enum(["pass", "watch", "risk"]),
+  summary: z.string(),
+  evidence: z.array(z.string()).catch([]),
+  engine: z.string().catch("unknown"),
+  latency_ms: z.number().finite().nonnegative().catch(0),
+});
+
+export interface TriageResult {
+  subtasks: SubTaskNode[];
+  source: "ai" | "local" | "cached";
+  telemetry: InferenceTelemetry;
+  trace: AgentReasoningStep[] | null;
+}
+
 const StudyPlan = z.object({
   course_id: z.string().min(1),
   detected_triggers: z.array(z.string()),
@@ -399,8 +417,8 @@ export const api = {
       ),
     ),
 
-  // The measured endpoint returns the same tree plus inference usage.
-  triage: async (assignmentId: string) => {
+  // The measured endpoint returns the same tree plus inference usage and the agent trace.
+  triage: async (assignmentId: string): Promise<TriageResult> => {
     const raw = await request(
       "/api/decompose",
       {
@@ -419,11 +437,22 @@ export const api = {
           completion_tokens: z.number().int().nonnegative().nullable(),
           tokens_per_sec: z.number().finite().nonnegative().nullable(),
         }),
+        // A backend without the agent (or a malformed trace) leaves the terminal to build one.
+        agent_reasoning_trace: z
+          .array(TraceStep)
+          .length(4)
+          .nullable()
+          .catch(null),
       })
       .parse(raw);
-    const nodes = normalizeTriage(raw, assignmentId);
+    const subtasks = normalizeTriage(raw, assignmentId);
     useInference.getState().finish(result.telemetry, result.source);
-    return nodes;
+    return {
+      subtasks,
+      source: result.source,
+      telemetry: result.telemetry,
+      trace: result.agent_reasoning_trace ?? null,
+    };
   },
 
   patchSubtask: (

@@ -6,6 +6,8 @@ import {
   deadlineLoad,
   deriveStatus,
   findNode,
+  floorText,
+  gradeRisk,
   leaves,
   localTriage,
   logMinutes,
@@ -16,11 +18,13 @@ import {
   velocityByCourse,
   priorityTier,
   rankQueue,
+  reasoningTrace,
   rollup,
   rubricBreakdown,
   setCompletion,
   studyRecommendation,
   temporalByCourse,
+  triageContext,
   updateSubtasks,
   velocityFills,
   velocityTier,
@@ -529,5 +533,150 @@ describe("what-if projection", () => {
     expect(
       projectGrade({ ...course, current_score: null }, [lab], {}, NOW),
     ).toBeNull();
+  });
+});
+
+describe("agent reasoning trace", () => {
+  const state = createMockState(NOW);
+  const byId = (id: string) => state.assignments.find((a) => a.id === id)!;
+  const courseOf = (a: Assignment) =>
+    state.courses.find((c) => c.id === a.course_id)!;
+  const planner = { engine: "local-planner", latency_ms: 12 };
+
+  it("prices risk weight by the grade floor, matching the backend agent", () => {
+    // Same fixtures and numbers as backend/tests/test_agent_trace.py.
+    const raft = byId("cs3801-raft");
+    const lab = gradeRisk(raft, courseOf(raft));
+    expect(lab.floor).toBeCloseTo(82.8);
+    expect(lab.tier).toBe("medium");
+    expect(floorText(lab.floor, courseOf(raft))).toBe(
+      "score ≥ 82.8% holds the 90.0 target (margin +2.4)",
+    );
+    const project = byId("math4102-queue");
+    const out = gradeRisk(project, courseOf(project));
+    expect(out.floor).toBeCloseTo(105.6);
+    expect(out.tier).toBe("high");
+    expect(floorText(out.floor, courseOf(project))).toMatch(
+      /^105\.6% needed: the 90\.0 target is out of reach/,
+    );
+    expect(gradeRisk({ weight: 0 }, courseOf(raft))).toEqual({
+      floor: null,
+      tier: "low",
+    });
+    expect(gradeRisk({ weight: 25 }, null).tier).toBe("high");
+  });
+
+  it("reads text and rounds halves the way the backend agent does", () => {
+    // Same expectations as test_text_and_numbers_render_like_the_terminal.
+    expect(
+      rubricBreakdown({
+        description: "Rubric: Análisis de datos 40%, Präsentation 60%.",
+        points_possible: 100,
+      }).map((line) => [line.criterion, line.percent]),
+    ).toEqual([
+      ["lisis de datos", 40],
+      ["sentation", 60],
+    ]);
+    const project = { ...byId("math4102-queue"), due_at: at(8) };
+    const context = {
+      ...triageContext(state, project, NOW),
+      course: { ...courseOf(project), current_score: 92.25, target_score: 90 },
+      queued: 60,
+    };
+    const [, capacity] = reasoningTrace(project, context, [], planner);
+    expect(capacity.evidence[0]).toBe("MARGIN +2.3 pts vs the 90.0 target");
+    expect(capacity.evidence.at(-1)).toMatch(/^LOAD 13% of the/);
+  });
+
+  it("traces four grounded steps over a plan", () => {
+    const raft = { ...byId("cs3801-raft"), subtasks: [] };
+    const context = triageContext(state, raft, NOW);
+    const plan = localTriage(raft);
+    const trace = reasoningTrace(raft, context, plan, planner);
+    expect(trace.map((step) => `[0${step.step} // ${step.title}]`)).toEqual([
+      "[01 // INGEST & AUDIT]",
+      "[02 // CAPACITY CHECK]",
+      "[03 // CRITICAL PATH]",
+      "[04 // VERIFICATION]",
+    ]);
+    const [ingest, capacity, path, verify] = trace;
+    expect(ingest.status).toBe("watch");
+    expect(ingest.evidence[0]).toBe("RUBRIC test harness 60% (90 pts)");
+    expect(ingest.summary).toContain("MEDIUM risk weight");
+    expect(capacity.evidence[0]).toBe("MARGIN +2.4 pts vs the 90.0 target");
+    expect(path).toMatchObject({ engine: "local-planner", latency_ms: 12 });
+    expect(path.evidence).toContain("BOUNDS every task inside 15–45m");
+    const { velocity, fills } = velocityFills(state.assignments);
+    expect(verify.evidence[0]).toMatch(
+      new RegExp(`^VELOCITY ${velocity!.toFixed(0)}% over ${fills} completed`),
+    );
+    // Other open work due before the lab competes for its window.
+    const competing = state.assignments.filter(
+      (a) =>
+        a.id !== raft.id &&
+        a.status !== "completed" &&
+        Date.parse(a.due_at!) <= Date.parse(raft.due_at!),
+    );
+    expect(context.queued).toBe(
+      competing
+        .flatMap((a) => leaves(a.subtasks))
+        .filter((leaf) => !leaf.is_completed)
+        .reduce((sum, leaf) => sum + leaf.estimated_minutes, 0),
+    );
+    expect(context.openBudget).toBeGreaterThanOrEqual(context.queued);
+  });
+
+  it("flags overdue work and a below-target course", () => {
+    const project = { ...byId("math4102-queue"), due_at: at(-3) };
+    const trace = reasoningTrace(
+      project,
+      triageContext(state, project, NOW),
+      localTriage(project),
+      planner,
+    );
+    expect(trace.map((step) => step.status)).toEqual([
+      "risk",
+      "risk",
+      "pass",
+      "risk",
+    ]);
+    expect(trace[1].evidence).toContain("WINDOW deadline passed 3h 00m ago");
+    expect(trace[1].summary).toMatch(/^Margin −3\.9 · /);
+
+    const calm = { ...byId("math4102-queue"), due_at: at(24 * 30) };
+    const quiet = reasoningTrace(
+      calm,
+      { ...triageContext(state, calm, NOW), queued: 0 },
+      localTriage(calm),
+      planner,
+    );
+    // Plenty of time, but 3.9 below target is never a clean pass.
+    expect(quiet[1].status).toBe("watch");
+  });
+
+  it("re-prices the plan at historical velocity", () => {
+    const project = { ...byId("math4102-queue"), due_at: at(48) };
+    const plan = [node("a", [], { estimated_minutes: 45 })];
+    const slow = {
+      ...triageContext(state, project, NOW),
+      queued: 0,
+      history: {
+        estimated: 60,
+        actual: 90,
+        fills: 2,
+        velocity: (60 / 90) * 100,
+      },
+    };
+    const verify = reasoningTrace(project, slow, plan, planner)[3];
+    // 67% velocity turns a 45m plan into 1h 08m, and is an overrun.
+    expect(verify.evidence[1]).toBe("ADJUSTED plan 45m → 1h 08m at this pace");
+    expect(verify.status).toBe("watch");
+    const fresh = {
+      ...slow,
+      history: { estimated: 0, actual: 0, fills: 0, velocity: null },
+    };
+    expect(reasoningTrace(project, fresh, plan, planner)[3].evidence[0]).toBe(
+      "VELOCITY no completed tasks yet · estimates taken at face value",
+    );
   });
 });

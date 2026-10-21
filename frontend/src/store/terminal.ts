@@ -13,12 +13,13 @@
 //             Background polls never swap datasets mid-session.
 
 import { create } from "zustand";
-import { useInference } from "@/store/inference";
+import { useInference, type InferenceTelemetry } from "@/store/inference";
 import {
   ApiError,
   api,
   normalizeState,
   type CanvasCredentials,
+  type TriageResult,
 } from "@/lib/api";
 import {
   appendSnapshot,
@@ -26,14 +27,17 @@ import {
   localTriage,
   logMinutes,
   rankQueue,
+  reasoningTrace,
   rollup,
   setCompletion,
+  triageContext,
   updateSubtasks,
 } from "@/lib/engine";
 import { minutes } from "@/lib/format";
 import { createMockState } from "@/lib/mockData";
 import { reanchor } from "@/lib/sandbox";
 import type {
+  AgentReasoningStep,
   ConnectionMode,
   DataOrigin,
   GradePoint,
@@ -52,6 +56,16 @@ export const SANDBOX_READY =
   "SYS // ISOLATED SANDBOX DESK ACTIVE · DETERMINISTIC ENGINE READY (CTRL+SHIFT+D TO TOGGLE LIVE API)";
 /** The execution deck streams its triage log this long before a tree mounts. */
 export const TRIAGE_STREAM_MS = 800;
+/** Then each agent reasoning step lands this far apart before the tree is revealed. */
+export const TRACE_STEP_MS = 320;
+
+export interface AgentTrace {
+  steps: AgentReasoningStep[];
+  /** ai: the backend's model planned · local: a starter or offline plan · cached: a saved plan was kept. */
+  source: "ai" | "local" | "cached";
+  /** Measured inference for the planning step; null when no model ran. */
+  telemetry: InferenceTelemetry | null;
+}
 
 type Patch = { is_completed?: boolean; actual_minutes?: number };
 
@@ -68,7 +82,10 @@ interface TerminalStore {
   studying: Record<string, true>;
   insertingStudy: Record<string, true>;
   studyErrors: Record<string, string>;
-  triaging: Record<string, true>;
+  /** Assignment id → when its triage started (ms epoch). */
+  triaging: Record<string, number>;
+  /** The latest agent reasoning trace per assignment; session-only, never persisted. */
+  traces: Record<string, AgentTrace>;
   syncing: boolean;
   /** Held in memory only — never persisted or written to storage. */
   credentials: CanvasCredentials | null;
@@ -256,7 +273,7 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
       get().data?.metrics.demo_mode !== state.metrics.demo_mode
     ) {
       datasetVersion += 1;
-      set({ studyPlans: {}, studyErrors: {} });
+      set({ studyPlans: {}, studyErrors: {}, traces: {} });
     }
     revision += 1;
     const data = withLedger(state, Date.now());
@@ -283,6 +300,7 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
       selectedId: keepSelection(local),
       studyPlans: {},
       studyErrors: {},
+      traces: {},
     });
     commit(local);
     return restored !== null;
@@ -412,6 +430,7 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
     insertingStudy: {},
     studyErrors: {},
     triaging: {},
+    traces: {},
     syncing: false,
     credentials: null,
     events: [],
@@ -707,22 +726,28 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
       )
         return;
       useInference.getState().start();
-      set((s) => ({
-        selectedId: assignmentId,
-        triaging: { ...s.triaging, [assignmentId]: true },
-      }));
+      const started = Date.now();
+      const version = datasetVersion;
+      set((s) => {
+        const traces = { ...s.traces };
+        delete traces[assignmentId];
+        return {
+          selectedId: assignmentId,
+          triaging: { ...s.triaging, [assignmentId]: started },
+          traces,
+        };
+      });
       const done = () =>
         set((s) => {
           const next = { ...s.triaging };
           delete next[assignmentId];
           return { triaging: next };
         });
-      const started = Date.now();
 
-      let subtasks: SubTaskNode[] | null = null;
+      let result: TriageResult | null = null;
       if (isRemote(get().mode)) {
         try {
-          subtasks = await api.triage(assignmentId);
+          result = await api.triage(assignmentId);
         } catch (error) {
           useInference.getState().finish(null, "unavailable");
           if (!isNetwork(error)) {
@@ -738,21 +763,64 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
         }
       }
 
-      const local = !subtasks;
-      if (!subtasks) {
-        useInference.getState().finish(null, "local");
-        subtasks = localTriage(assignment);
-      }
+      const local = !result;
+      const planStarted = Date.now();
+      const subtasks = result?.subtasks ?? localTriage(assignment);
+      // Planner time only: not a failed round trip before it, nor the display delay after.
+      const planned = Date.now() - planStarted;
+      if (local) useInference.getState().finish(null, "local");
+      /**
+       * True when this plan no longer fits the screen: the dataset was swapped
+       * (Ctrl+Shift+D, reset, reconnect) or the backend came back during a
+       * local run. Checked after every wait, right before anything is written.
+       */
+      const stale = () => {
+        if (version !== datasetVersion) {
+          log(
+            "info",
+            `Triage of ${titleOf(data, assignmentId)} discarded: the dataset changed while it ran.`,
+          );
+        } else if (local && isRemote(get().mode)) {
+          log(
+            "info",
+            "Backend came online during triage. Run triage again to use Llama-3.",
+          );
+        } else {
+          return false;
+        }
+        done();
+        return true;
+      };
       // Let the decomposition log play out; an instant swap reads as a glitch.
       await wait(Math.max(0, TRIAGE_STREAM_MS - (Date.now() - started)));
-      if (local && isRemote(get().mode)) {
-        log(
-          "info",
-          "Backend came online during triage. Run triage again to use Llama-3.",
+      if (stale()) return;
+
+      // Stream the agent's four steps into the deck, then reveal the tree.
+      const steps =
+        result?.trace ??
+        reasoningTrace(
+          assignment,
+          triageContext(get().data ?? data!, assignment, Date.now()),
+          subtasks,
+          result
+            ? {
+                engine: result.telemetry.model_used,
+                latency_ms: result.telemetry.latency_ms,
+              }
+            : { engine: "local-planner", latency_ms: planned },
         );
-        done();
-        return;
-      }
+      set((s) => ({
+        traces: {
+          ...s.traces,
+          [assignmentId]: {
+            steps,
+            source: result?.source ?? "local",
+            telemetry: result?.source === "ai" ? result.telemetry : null,
+          },
+        },
+      }));
+      await wait(TRACE_STEP_MS * steps.length);
+      if (stale()) return;
 
       const current = get().data;
       if (current?.assignments.some((a) => a.id === assignmentId)) {
@@ -760,20 +828,21 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
       }
       done();
       const totals = rollup(subtasks);
-      const inference = useInference.getState().status;
+      // This run's own answer: another triage may have started during the stream.
+      const source = result?.source ?? "local";
       // The backend never replaces a tree that already has checked tasks or logged time.
-      if (inference === "cached") {
+      if (source === "cached") {
         log(
           "info",
           `Kept the saved plan for ${titleOf(get().data, assignmentId)}: work is already logged on it, so it was not replaced.`,
         );
         return;
       }
-      const planner =
-        local || inference === "local" ? "starter plan" : "Llama-3";
+      const planner = source === "local" ? "starter plan" : "Llama-3";
+      const risks = steps.filter((step) => step.status === "risk").length;
       log(
-        "ok",
-        `Triage complete (${planner}): ${titleOf(get().data, assignmentId)} → ${totals.total} tasks, ${minutes(totals.estimated)} budget.`,
+        risks ? "warn" : "ok",
+        `Triage complete (${planner}): ${titleOf(get().data, assignmentId)} → ${totals.total} tasks, ${minutes(totals.estimated)} budget${risks ? `; agent flagged ${risks} risk ${risks === 1 ? "step" : "steps"}` : ""}.`,
       );
       if (local && get().origin === "backend") {
         log(
@@ -826,7 +895,7 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
     resetSandbox: () => {
       if (isRemote(get().mode)) return;
       datasetVersion += 1;
-      set({ studyPlans: {}, studyErrors: {} });
+      set({ studyPlans: {}, studyErrors: {}, traces: {} });
       queue.clear();
       set({ origin: "sandbox", queuedEdits: 0 });
       const fresh = createMockState(Date.now());

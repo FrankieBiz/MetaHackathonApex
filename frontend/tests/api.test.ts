@@ -202,3 +202,65 @@ describe("feed interceptor", () => {
     expect(sync.simulated && sync.cause.kind).toBe("timeout");
   });
 });
+
+describe("api.triage", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const step = (index: number) => ({
+    step: index + 1,
+    title: [
+      "INGEST & AUDIT",
+      "CAPACITY CHECK",
+      "CRITICAL PATH",
+      "VERIFICATION",
+    ][index],
+    status: "pass",
+    summary: "ok",
+    evidence: ["LOAD 12% of the window with this plan"],
+    engine: "velocity-auditor",
+    latency_ms: 1,
+  });
+  const decompose = (extra: Record<string, unknown>) =>
+    vi.stubGlobal(
+      "fetch",
+      async () =>
+        new Response(
+          JSON.stringify({
+            subtasks: [{ id: "x", title: "X", estimated_minutes: 30 }],
+            source: "ai",
+            telemetry: {
+              model_used: "muse-spark",
+              latency_ms: 900,
+              prompt_tokens: 300,
+              completion_tokens: 120,
+              tokens_per_sec: 133.3,
+            },
+            ...extra,
+          }),
+        ),
+    );
+
+  it("returns the tree, telemetry, and the four-step agent trace", async () => {
+    decompose({ agent_reasoning_trace: [0, 1, 2, 3].map(step) });
+    const result = await api.triage("a");
+    expect(result.subtasks.map((n) => n.id)).toEqual(["x"]);
+    expect(result.telemetry.model_used).toBe("muse-spark");
+    expect(result.trace?.map((s) => s.title)).toEqual([
+      "INGEST & AUDIT",
+      "CAPACITY CHECK",
+      "CRITICAL PATH",
+      "VERIFICATION",
+    ]);
+  });
+
+  it("keeps the tree when the trace is missing or malformed", async () => {
+    decompose({});
+    expect((await api.triage("a")).trace).toBeNull();
+    decompose({ agent_reasoning_trace: [step(0)] });
+    expect((await api.triage("a")).trace).toBeNull();
+    decompose({ agent_reasoning_trace: "not a trace" });
+    const result = await api.triage("a");
+    expect(result.trace).toBeNull();
+    expect(result.subtasks).toHaveLength(1);
+  });
+});

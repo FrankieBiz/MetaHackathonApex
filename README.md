@@ -202,8 +202,21 @@ legacy_archive/       Original Vite + Express workspace that predates the termin
 
 ## Meta inference telemetry
 
-Set server-only `META_API_KEY` to enable Meta Model API. `META_BASE_URL` defaults to `https://api.llama.com/compat/v1`; `META_MODEL` defaults to `Llama-3.3-70B-Instruct` and also accepts `Llama-3.1-8B-Instruct` or the model ID served by your endpoint. Model availability depends on the deployment; configure an endpoint serving the requested version. Meta's [compatibility configuration example](https://dev.meta.ai/llama/resources/cookbook/documentlens) documents the base URL. Existing `LLM_*` settings continue to work without a Meta key.
+Set server-only `META_API_KEY` to enable Meta Model API. `META_BASE_URL` defaults to `https://api.llama.com/compat/v1`; `META_MODEL` defaults to `Llama-3.3-70B-Instruct` and also accepts `Llama-3.1-8B-Instruct`, a Llama 4 model, `muse-spark`, `muse-wonder`, or any other model ID served by your endpoint. Model availability depends on the deployment; configure an endpoint serving the requested version. Meta's [compatibility configuration example](https://dev.meta.ai/llama/resources/cookbook/documentlens) documents the base URL. Existing `LLM_*` settings continue to work without a Meta key.
 
 `POST /api/decompose` (also `/decompose`) accepts `{ "assignment_id": "..." }` and returns `subtasks`, `source`, and `telemetry: { model_used, latency_ms, prompt_tokens, completion_tokens, tokens_per_sec }`. Throughput is completion tokens divided by full API round-trip seconds, including request and prefill latency. Unreported usage is `null` and appears as `—`; local starter plans and saved plans are explicitly labeled rather than presented as model inference. Measurements stay in browser memory and are excluded from persisted course and task data. The legacy triage route keeps its array response for existing clients.
+
+## Agentic triage trace
+
+`POST /api/decompose` also returns `agent_reasoning_trace`, four steps of `{ step, title, status, summary, evidence, engine, latency_ms }`, where `status` is `pass`, `watch`, or `risk`:
+
+| Step | What it computes | Engine |
+| --- | --- | --- |
+| `[01 // INGEST & AUDIT]` | Rubric constraints, the deliverable's weight, and its grade floor: the lowest score that keeps the course on target with other work held at the current grade. A floor of 85% or more is a HIGH risk weight. | `AUDITOR_MODEL` (e.g. `deepseek-flash`) when `AUDITOR_API_KEY` is set and it answers; otherwise the rubric parser |
+| `[02 // CAPACITY CHECK]` | Course Margin of Safety, Open Budget (estimated minutes still open on other active work), and the share of the time left before the deadline that work due earlier already needs | `capacity-engine` |
+| `[03 // CRITICAL PATH]` | The primary model's plan as a sequence of atomic 15–45 minute tasks, with the model's one-line sequencing note | `META_MODEL`, or `local-starter-plan` / `cached-plan` |
+| `[04 // VERIFICATION]` | The plan re-priced at the student's historical Completion Velocity, and the deadline load and slack that result | `velocity-auditor` |
+
+Steps 01 and 02 run first and their findings are sent to the primary model as an `agent_brief`. Every figure in the trace (floors, margins, budgets, loads, velocity) is computed by the server from terminal state; the only model-written text is the labeled `MODEL NOTE` line and, when the pre-filter answers, its `RUBRIC` constraints. The execution deck streams the four steps with live latency before revealing the tree, and the order book inspector keeps them as the selected deliverable's agent brief. With the backend offline, the terminal's local planner produces the same trace in the browser (`reasoningTrace` in `frontend/src/lib/engine.ts`).
 
 For judging, select an assignment in the Order Book, move its highlighted 0–100% what-if slider, and watch the projected grade and Margin of Safety update. Then execute triage with a configured Meta endpoint to populate the header badge with real model throughput and latency. Tests mock inference; live Meta validation requires your own credentials. The original TypeScript implementation is preserved under `legacy_archive/`.

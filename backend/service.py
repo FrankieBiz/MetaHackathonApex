@@ -6,10 +6,17 @@ from statistics import pstdev
 
 from openai import AsyncOpenAI
 
-from .ai_engine import deconstruct_assignment, generate_study_recommendation, task_id
+from .ai_engine import (
+    generate_study_recommendation,
+    run_triage_agent,
+    saved_plan_trace,
+    task_id,
+    triage_context,
+)
 from .canvas_client import CanvasClient, CanvasSnapshot
 from .config import Settings
 from .models import (
+    AgentReasoningStep,
     AssignmentModel,
     InferenceTelemetry,
     StudyInsertRequest,
@@ -29,11 +36,14 @@ class TerminalService:
         canvas: CanvasClient,
         store: SupabaseStore,
         llm: AsyncOpenAI,
+        auditor: AsyncOpenAI | None = None,
     ) -> None:
         self.settings = settings
         self.canvas = canvas
         self.store = store
         self.llm = llm
+        # Optional pre-filter model; without one the agent parses the rubric itself.
+        self.auditor = auditor
         self._lock = asyncio.Lock()
         self._states: dict[bool, TerminalState] = {}
         self._loaded: set[bool] = set()
@@ -184,25 +194,41 @@ class TerminalService:
             self._dirty[source].clear()
 
     async def triage(
-        self, assignment_id: str, *, telemetry: InferenceTelemetry | None = None
+        self,
+        assignment_id: str,
+        *,
+        telemetry: InferenceTelemetry | None = None,
+        trace: list[AgentReasoningStep] | None = None,
     ) -> list[SubTaskNode]:
+        """Runs the triage agent; `telemetry` and `trace` are filled in when supplied."""
         async with self._lock:
             await self._sync()
             assert self._state is not None
             assignment = next((a for a in self._state.assignments if a.id == assignment_id), None)
             if assignment is None:
                 raise KeyError(assignment_id)
+            context = triage_context(self._state, assignment, datetime.now(UTC))
             # Repeated requests must not discard a plan on which work has already been recorded.
             if any(node.is_completed or node.actual_minutes for node in walk(assignment.subtasks)):
                 if telemetry is not None:
                     telemetry.model_used = "cached-plan"
-                return [node.model_copy(deep=True) for node in assignment.subtasks]
+                kept = [node.model_copy(deep=True) for node in assignment.subtasks]
+                if trace is not None:
+                    trace[:] = saved_plan_trace(assignment, context, kept)
+                return kept
             source = self._state.metrics.demo_mode
             material = (assignment.title, assignment.description)
             request_assignment = assignment.model_copy(deep=True)
-        nodes = await deconstruct_assignment(
-            request_assignment, settings=self.settings, client=self.llm, telemetry=telemetry
+        nodes, steps = await run_triage_agent(
+            request_assignment,
+            context,
+            settings=self.settings,
+            client=self.llm,
+            auditor=self.auditor,
+            telemetry=telemetry,
         )
+        if trace is not None:
+            trace[:] = steps
         async with self._lock:
             assert self._state is not None
             assignment = next((a for a in self._state.assignments if a.id == assignment_id), None)
@@ -213,7 +239,16 @@ class TerminalService:
             ):
                 raise RuntimeError("Assignment changed during triage; retry with current state")
             if any(node.is_completed or node.actual_minutes for node in walk(assignment.subtasks)):
-                return [node.model_copy(deep=True) for node in assignment.subtasks]
+                # Work landed while the model ran: the saved plan wins, and so does its trace.
+                kept = [node.model_copy(deep=True) for node in assignment.subtasks]
+                if telemetry is not None:
+                    telemetry.model_used = "cached-plan"
+                if trace is not None:
+                    now = datetime.now(UTC)
+                    trace[:] = saved_plan_trace(
+                        assignment, triage_context(self._state, assignment, now), kept
+                    )
+                return kept
             assignment.subtasks = nodes
             if assignment.status == "completed":
                 for node in nodes:

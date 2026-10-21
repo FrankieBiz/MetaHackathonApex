@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     meta_api_key: SecretStr = SecretStr("")
     meta_base_url: str = "https://api.llama.com/compat/v1"
     meta_model: str = "Llama-3.3-70B-Instruct"
+    # Optional fast pre-filter that audits rubric constraints before the primary plan.
+    auditor_api_key: SecretStr = SecretStr("")
+    auditor_base_url: str = "https://api.deepseek.com/v1"
+    auditor_model: str = "deepseek-flash"
+    auditor_timeout_seconds: float = Field(default=6, gt=0, le=60)
     demo_mode: bool | None = None
     llm_timeout_seconds: float = Field(default=15, gt=0, le=120)
     # Any single Canvas request slower than this switches the sync to the simulation desk.
@@ -78,7 +83,7 @@ class Settings(BaseSettings):
             raise ValueError("CANVAS_API_URL must be an HTTPS origin without credentials")
         return value.rstrip("/")
 
-    @field_validator("llm_base_url", "meta_base_url", "supabase_url")
+    @field_validator("llm_base_url", "meta_base_url", "auditor_base_url", "supabase_url")
     @classmethod
     def service_url(cls, value: str) -> str:
         if not value:
@@ -112,6 +117,10 @@ class Settings(BaseSettings):
     @property
     def inference_model(self) -> str:
         return self.meta_model if self.meta_api_key.get_secret_value() else self.llm_model
+
+    @property
+    def auditor_enabled(self) -> bool:
+        return bool(self.auditor_api_key.get_secret_value() and self.auditor_model.strip())
 
 
 @lru_cache

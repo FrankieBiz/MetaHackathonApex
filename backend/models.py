@@ -125,10 +125,28 @@ class DecomposeRequest(StrictModel):
     assignment_id: Identifier
 
 
+TraceLine = Annotated[str, Field(min_length=1, max_length=300)]
+
+
+class AgentReasoningStep(StrictModel):
+    """One stage of the triage agent, with the evidence it computed."""
+
+    step: Annotated[int, Field(ge=1, le=4)]
+    title: Literal["INGEST & AUDIT", "CAPACITY CHECK", "CRITICAL PATH", "VERIFICATION"]
+    # pass: inside every threshold · watch: one is close · risk: the grade buffer is exposed.
+    status: Literal["pass", "watch", "risk"]
+    summary: TraceLine
+    evidence: Annotated[list[TraceLine], Field(max_length=6)]
+    # The model, or deterministic engine, that produced this step.
+    engine: Annotated[str, Field(min_length=1, max_length=120)]
+    latency_ms: Annotated[int, Field(ge=0)]
+
+
 class DecomposeResponse(StrictModel):
     subtasks: list[SubTaskNode]
     telemetry: InferenceTelemetry
     source: Literal["ai", "local", "cached"]
+    agent_reasoning_trace: Annotated[list[AgentReasoningStep], Field(min_length=4, max_length=4)]
 
 
 class RecentStudyAssignment(StrictModel):

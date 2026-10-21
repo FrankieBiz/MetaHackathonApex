@@ -1,19 +1,26 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { Key, Meter, Panel, Spinner } from "@/components/ui";
+import { Key, Meter, Panel, Spinner, TRACE_STATUS } from "@/components/ui";
 import { useNow } from "@/hooks/useNow";
 import { API_BASE } from "@/lib/api";
-import { priorityScore, rollup } from "@/lib/engine";
 import { countdown, minutes, score } from "@/lib/format";
+import { priorityScore, rollup } from "@/lib/engine";
 import {
+  TRACE_STEP_MS,
   TRIAGE_STREAM_MS,
   activeCourseOf,
   isRemote,
   useTerminal,
+  type AgentTrace,
 } from "@/store/terminal";
 import { studyOpportunity, studyTitleKey } from "@/lib/study";
-import type { Assignment, Course, SubTaskNode } from "@/types";
+import type {
+  AgentReasoningStep,
+  Assignment,
+  Course,
+  SubTaskNode,
+} from "@/types";
 
 const STATUS_LABEL: Record<
   Assignment["status"],
@@ -24,17 +31,110 @@ const STATUS_LABEL: Record<
   completed: { text: "COMPLETED", color: "text-up" },
 };
 
-function TriageLog({
+/** Evidence keys the agent writes ahead of each finding (backend/ai_engine.py). */
+const EVIDENCE_KEY =
+  /^(RUBRIC|WEIGHT|FLOOR|PRE-FILTER|MARGIN|OPEN BUDGET|WINDOW|QUEUED|LOAD|SEQUENCE|START|FINISH|BOUNDS|SAVED PLAN|MODEL NOTE|VELOCITY|ADJUSTED|DEADLINE|SLACK|SHORTFALL) (.*)$/;
+
+const ms = (value: number) => `${Math.round(value).toLocaleString("en-US")}MS`;
+
+/** Measured numbers only: no tok/s unless a model actually ran. */
+function traceTelemetry(trace: AgentTrace): string {
+  if (trace.source === "cached") return "SAVED PLAN · NO INFERENCE";
+  if (!trace.telemetry) return "LOCAL PLANNER · NO INFERENCE";
+  const { tokens_per_sec, latency_ms } = trace.telemetry;
+  return `${tokens_per_sec?.toFixed(1) ?? "—"} TOK/S · ${ms(latency_ms)}`;
+}
+
+/** Wall time since the request left, ticking while it is in flight. */
+function LiveLatency({ since }: { since: number }) {
+  const now = useNow(100);
+  return (
+    <span className="text-accent tabular-nums">
+      — TOK/S · LIVE {ms(Math.max(0, now - since))}
+    </span>
+  );
+}
+
+/** One step: a single summary line, opening onto its evidence. */
+function TraceStepRow({
+  step,
+  expanded,
+}: {
+  step: AgentReasoningStep;
+  /** Open while streaming; afterwards each step folds to its summary line. */
+  expanded: boolean;
+}) {
+  const status = TRACE_STATUS[step.status];
+  return (
+    <details open={expanded} className="log-line group mt-1">
+      <summary
+        title={step.summary}
+        className="flex cursor-pointer list-none items-baseline gap-2 hover:bg-hover [&::-webkit-details-marker]:hidden"
+      >
+        <span aria-hidden className="w-[1ch] shrink-0 text-ink-3">
+          <span className="group-open:hidden">▸</span>
+          <span className="hidden group-open:inline">▾</span>
+        </span>
+        <span className="shrink-0 text-accent">
+          [{String(step.step).padStart(2, "0")} {"//"} {step.title}]
+        </span>
+        <span
+          className={`w-[5ch] shrink-0 text-[10px] tracking-wider ${status.color}`}
+        >
+          {status.label}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-ink">{step.summary}</span>
+        <span className="max-w-[35%] shrink-0 truncate text-right text-[10px] text-ink-3">
+          <span className="sr-only">Engine and latency: </span>
+          {step.engine} · {step.latency_ms.toLocaleString("en-US")}ms
+        </span>
+      </summary>
+      <ul className="pl-[2ch] text-[11px] text-ink-2">
+        {step.evidence.map((line, index) => {
+          const [, key, rest] = line.match(EVIDENCE_KEY) ?? [, null, line];
+          return (
+            <li key={index} className="flex gap-1.5">
+              <span aria-hidden className="shrink-0 text-bar-neutral">
+                │
+              </span>
+              <span className="min-w-0 break-words">
+                {key && <span className="text-ink-3">{key} </span>}
+                {rest}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </details>
+  );
+}
+
+/**
+ * The triage agent's terminal log. While a run is in flight it plays the
+ * request preamble with live latency; once the agent answers, its four
+ * reasoning steps stream in before the store reveals the tree.
+ */
+function AgentTraceLog({
   assignment,
   remote,
   now,
+  startedAt,
+  trace,
+  open,
+  onToggle,
 }: {
   assignment: Assignment;
   remote: boolean;
   now: number;
+  /** Set while this assignment's triage is running. */
+  startedAt: number | undefined;
+  trace: AgentTrace | undefined;
+  open: boolean;
+  onToggle: () => void;
 }) {
-  // Only a reachable backend runs Llama; offline, the local planner builds the tree.
-  const agent = remote ? "[META-LLAMA]" : "[LOCAL-PLANNER]";
+  const running = startedAt !== undefined;
+  // Only a reachable backend runs the Meta model; offline, the local planner builds the tree.
+  const agent = remote ? "[META-AGENT]" : "[LOCAL-PLANNER]";
   const lines = useMemo(
     () => [
       {
@@ -52,42 +152,114 @@ function TriageLog({
             : ""
         }`,
       },
-      { tag: agent, text: "Parsing rubric constraints…" },
-      { tag: agent, text: "Generating atomic work tree…" },
-      { tag: agent, text: "Splitting into 15–45 min micro-tasks…" },
+      { tag: agent, text: "Ingesting rubric and auditing point weights…" },
+      { tag: agent, text: "Checking capacity against margin and open budget…" },
+      {
+        tag: agent,
+        text: remote
+          ? "Sequencing the critical path with the Meta model…"
+          : "Sequencing the critical path…",
+      },
     ],
     // `now` only seeds the countdown line; the script must not restart every tick.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [assignment.id, remote],
   );
-  const [shown, setShown] = useState(1);
+  const [shownLines, setShownLines] = useState(1);
   useEffect(() => {
-    if (shown >= lines.length) return;
+    if (!running || shownLines >= lines.length) return;
     // Every line lands inside the store's minimum stream window.
     const timer = setTimeout(
-      () => setShown((n) => n + 1),
+      () => setShownLines((n) => n + 1),
       (TRIAGE_STREAM_MS - 100) / (lines.length - 1),
     );
     return () => clearTimeout(timer);
-  }, [shown, lines.length]);
+  }, [running, shownLines, lines.length]);
+
+  const [shownSteps, setShownSteps] = useState(0);
+  const total = trace?.steps.length ?? 0;
+  useEffect(() => {
+    if (!running || shownSteps >= total) return;
+    // The store holds the tree back for TRACE_STEP_MS per step.
+    const timer = setTimeout(
+      () => setShownSteps((n) => n + 1),
+      shownSteps ? TRACE_STEP_MS : 0,
+    );
+    return () => clearTimeout(timer);
+  }, [running, shownSteps, total]);
+
+  const steps = trace?.steps.slice(0, running ? shownSteps : total) ?? [];
+  const flags = (["risk", "watch"] as const)
+    .map((status) => ({
+      status,
+      count: steps.filter((step) => step.status === status).length,
+    }))
+    .filter((flag) => flag.count);
 
   return (
-    <div className="px-3 py-3 text-[12px]" role="status" aria-live="polite">
-      {lines.slice(0, shown).map((line, index) => (
+    <section
+      aria-label="Agent reasoning trace"
+      className="shrink-0 border-b border-line bg-canvas/40"
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex h-6 w-full items-center gap-2 px-2.5 text-left text-[10px] tracking-wider uppercase hover:bg-hover"
+      >
+        <span className="shrink-0 text-ink-3">{open ? "▾" : "▸"}</span>
+        <span className="shrink-0 text-accent">Agent trace</span>
+        <span className="shrink-0 text-ink-3">
+          {trace ? `${steps.length}/${total} steps` : "running"}
+        </span>
+        {!running &&
+          flags.map((flag) => (
+            <span
+              key={flag.status}
+              className={`shrink-0 ${TRACE_STATUS[flag.status].color}`}
+            >
+              {flag.count} {TRACE_STATUS[flag.status].label}
+            </span>
+          ))}
+        <span className="ml-auto min-w-0 truncate text-right text-ink-3">
+          {trace ? (
+            traceTelemetry(trace)
+          ) : startedAt === undefined ? null : remote ? (
+            <LiveLatency since={startedAt} />
+          ) : (
+            "LOCAL PLANNER · NO INFERENCE"
+          )}
+        </span>
+      </button>
+      {open && (
         <div
-          key={index}
-          className={`log-line ${index === 0 ? "text-accent" : "text-ink-2"}`}
+          role="log"
+          aria-live="polite"
+          className={`px-2.5 pb-2 text-[12px] ${running ? "" : "max-h-48 overflow-y-auto"}`}
         >
-          <span className={line.tag === ">" ? "" : "text-accent"}>
-            {line.tag}
-          </span>{" "}
-          {line.text}
+          {running &&
+            lines.slice(0, shownLines).map((line, index) => (
+              <div
+                key={index}
+                className={`log-line ${index === 0 ? "text-accent" : "text-ink-2"}`}
+              >
+                <span className={line.tag === ">" ? "" : "text-accent"}>
+                  {line.tag}
+                </span>{" "}
+                {line.text}
+              </div>
+            ))}
+          {steps.map((step) => (
+            <TraceStepRow key={step.step} step={step} expanded={running} />
+          ))}
+          {running && (
+            <div className="mt-1 text-accent">
+              <Spinner /> <span className="caret">█</span>
+            </div>
+          )}
         </div>
-      ))}
-      <div className="mt-1 text-accent">
-        <Spinner /> <span className="caret">█</span>
-      </div>
-    </div>
+      )}
+    </section>
   );
 }
 
@@ -353,9 +525,14 @@ export function TaskTree() {
   const assignment = useTerminal(
     (s) => s.data?.assignments.find((a) => a.id === s.selectedId) ?? null,
   );
-  const triaging = useTerminal((s) =>
-    s.selectedId ? Boolean(s.triaging[s.selectedId]) : false,
+  const startedAt = useTerminal((s) =>
+    s.selectedId ? s.triaging[s.selectedId] : undefined,
   );
+  const trace = useTerminal((s) =>
+    s.selectedId ? s.traces[s.selectedId] : undefined,
+  );
+  const triaging = startedAt !== undefined;
+  const [traceOpen, setTraceOpen] = useState(true);
   const remote = useTerminal((s) => isRemote(s.mode));
   const triage = useTerminal((s) => s.triage);
   const now = useNow(1000);
@@ -471,9 +648,21 @@ export function TaskTree() {
           </div>
         )}
 
-        {triaging ? (
-          <TriageLog assignment={assignment} remote={remote} now={now} />
-        ) : assignment.subtasks.length ? (
+        {(triaging || trace) && (
+          <AgentTraceLog
+            // A fresh run (or its end) restarts the stream from the first line.
+            key={`${assignment.id}:${startedAt ?? "done"}`}
+            assignment={assignment}
+            remote={remote}
+            now={now}
+            startedAt={startedAt}
+            trace={trace}
+            open={traceOpen || triaging}
+            onToggle={() => setTraceOpen((v) => !v)}
+          />
+        )}
+
+        {triaging ? null : assignment.subtasks.length ? (
           <ul
             aria-label={`Work breakdown for ${assignment.title}`}
             className="py-1 text-[12px]"
@@ -496,7 +685,8 @@ export function TaskTree() {
               No work breakdown yet
             </div>
             <p className="max-w-[46ch] text-ink-2">
-              Llama-3 splits this assignment into 15–45 minute tasks you can
+              The triage agent audits the rubric and your capacity, then the
+              Meta model splits this assignment into 15–45 minute tasks you can
               check off and time.
             </p>
             <Key

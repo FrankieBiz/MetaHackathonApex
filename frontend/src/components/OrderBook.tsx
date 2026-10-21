@@ -8,10 +8,19 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { Key, Meter, Panel, Segmented, Spinner } from "@/components/ui";
+import {
+  Key,
+  Meter,
+  Panel,
+  Segmented,
+  Spinner,
+  TRACE_STATUS,
+} from "@/components/ui";
 import { useNow } from "@/hooks/useNow";
 import {
   HOUR,
+  floorText,
+  gradeRisk,
   priorityTier,
   rankQueue,
   rubricBreakdown,
@@ -21,7 +30,7 @@ import {
 import { countdown, score as fmtScore } from "@/lib/format";
 import { activeCourseOf, isRemote, useTerminal } from "@/store/terminal";
 import { studyOpportunity } from "@/lib/study";
-import type { Assignment } from "@/types";
+import type { Assignment, Course } from "@/types";
 
 const TIER_COLOR: Record<PriorityTier, string> = {
   high: "var(--color-down)",
@@ -183,22 +192,80 @@ function Fact({
   label,
   value,
   title,
+  color = "text-ink",
 }: {
   label: string;
   value: string;
   title?: string;
+  color?: string;
 }) {
   return (
     <div className="flex items-baseline gap-1.5" title={title}>
       <dt className="text-[10px] tracking-wider text-ink-3 uppercase">
         {label}
       </dt>
-      <dd className="text-[12px] text-ink">{value}</dd>
+      <dd className={`text-[12px] ${color}`}>{value}</dd>
     </div>
   );
 }
 
-/** Docked under the queue: the selected deliverable's prompt, rubric, and points. */
+/** The selected deliverable's grade floor, then the agent's last four verdicts. */
+function AgentBrief({
+  assignment,
+  course,
+}: {
+  assignment: Assignment;
+  course: Course | null;
+}) {
+  const trace = useTerminal((s) => s.traces[assignment.id]);
+  const running = useTerminal((s) => Boolean(s.triaging[assignment.id]));
+  const { floor } = gradeRisk(assignment, course);
+  return (
+    <>
+      <Caption>Agent brief</Caption>
+      <ul
+        aria-label="Agent brief"
+        className="flex flex-col gap-0.5 text-[11px]"
+      >
+        <li className="break-words text-ink-2">
+          <span className="text-ink-3">FLOOR </span>
+          {floorText(floor, course)}
+        </li>
+        {running ? (
+          <li className="text-accent">
+            <Spinner /> Agent running…
+          </li>
+        ) : trace ? (
+          trace.steps.map((step) => (
+            <li
+              key={step.step}
+              className="flex items-baseline gap-1.5"
+              title={[step.summary, ...step.evidence].join("\n")}
+            >
+              <span className="shrink-0 text-accent">
+                [{String(step.step).padStart(2, "0")}]
+              </span>
+              <span
+                className={`w-[5ch] shrink-0 text-[10px] tracking-wider ${TRACE_STATUS[step.status].color}`}
+              >
+                {TRACE_STATUS[step.status].label}
+              </span>
+              <span className="min-w-0 truncate text-ink-2">
+                {step.summary}
+              </span>
+            </li>
+          ))
+        ) : (
+          <li className="text-ink-3">
+            No agent run yet · deconstruct to audit capacity and pace.
+          </li>
+        )}
+      </ul>
+    </>
+  );
+}
+
+/** Docked under the queue: the selected deliverable's prompt, rubric, risk, and agent brief. */
 function Inspector() {
   const assignment = useTerminal(
     (s) => s.data?.assignments.find((a) => a.id === s.selectedId) ?? null,
@@ -209,19 +276,20 @@ function Inspector() {
     () => (assignment ? rubricBreakdown(assignment) : []),
     [assignment],
   );
+  const risk = assignment ? gradeRisk(assignment, course) : null;
 
   const prompt = assignment?.description?.trim() ?? "";
   const completed = assignment?.status === "completed";
 
   return (
     <section
-      aria-label="Deliverable inspector and rubric preview"
+      aria-label="Selected deliverable rubric and agent brief"
       // Gives way to the queue first, then scrolls inside; grows into spare height.
       className="flex min-h-[172px] shrink-[4] grow flex-col border-t border-line-strong"
     >
       <header className="flex h-7 shrink-0 items-center justify-between gap-3 border-b border-line bg-head px-2.5 text-[10px] tracking-wider uppercase">
         <span className="min-w-0 truncate text-accent">
-          Deliverable inspector &amp; rubric preview
+          Selected deliverable rubric &amp; agent brief
           {assignment && (
             <span className="text-ink-3">
               {" "}
@@ -294,6 +362,20 @@ function Inspector() {
                 }
                 title="Share of the final grade each point on this deliverable is worth"
               />
+              {risk && (
+                <Fact
+                  label="Risk wt"
+                  value={risk.tier.toUpperCase()}
+                  color={
+                    risk.tier === "high"
+                      ? "text-down"
+                      : risk.tier === "medium"
+                        ? "text-accent"
+                        : "text-ink-2"
+                  }
+                  title={`Grade floor: ${floorText(risk.floor, course)}`}
+                />
+              )}
             </dl>
             <Caption>
               Point breakdown
@@ -342,6 +424,7 @@ function Inspector() {
                 />
               </div>
             )}
+            <AgentBrief assignment={assignment} course={course} />
             {!remote && !completed && (
               <p className="mt-auto pt-1 text-[10px] text-ink-3">
                 Backend offline · deconstruct runs the local planner

@@ -1,6 +1,6 @@
 """Run from the repository root: python -m uvicorn backend.main:app --port 8000."""
 
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.exception_handlers import request_validation_exception_handler
@@ -13,6 +13,7 @@ from .ai_engine import generate_study_triage
 from .canvas_client import CanvasClient
 from .config import Settings, get_settings
 from .models import (
+    AgentReasoningStep,
     DecomposeRequest,
     DecomposeResponse,
     InferenceTelemetry,
@@ -41,13 +42,23 @@ def create_app(
             return
         canvas = CanvasClient(config)
         store = SupabaseStore(config)
-        async with AsyncOpenAI(
-            base_url=config.inference_base_url,
-            api_key=config.inference_api_key.get_secret_value(),
-            timeout=config.llm_timeout_seconds,
-            max_retries=0,
-        ) as llm:
-            app.state.terminal = TerminalService(config, canvas, store, llm)
+        async with (
+            AsyncOpenAI(
+                base_url=config.inference_base_url,
+                api_key=config.inference_api_key.get_secret_value(),
+                timeout=config.llm_timeout_seconds,
+                max_retries=0,
+            ) as llm,
+            AsyncOpenAI(
+                base_url=config.auditor_base_url,
+                api_key=config.auditor_api_key.get_secret_value(),
+                timeout=config.auditor_timeout_seconds,
+                max_retries=0,
+            )
+            if config.auditor_enabled
+            else nullcontext() as auditor,
+        ):
+            app.state.terminal = TerminalService(config, canvas, store, llm, auditor)
             try:
                 yield
             finally:
@@ -102,6 +113,7 @@ def create_app(
         return {
             "provider": "meta" if config.meta_api_key.get_secret_value() else "llama",
             "model": config.inference_model,
+            "auditor": config.auditor_model if config.auditor_enabled else "rubric-parser",
         }
 
     @app.post("/decompose", response_model=DecomposeResponse)
@@ -110,8 +122,11 @@ def create_app(
         body: DecomposeRequest, request: Request
     ) -> DecomposeResponse | JSONResponse:
         telemetry = InferenceTelemetry(model_used="none")
+        trace: list[AgentReasoningStep] = []
         try:
-            nodes = await request.app.state.terminal.triage(body.assignment_id, telemetry=telemetry)
+            nodes = await request.app.state.terminal.triage(
+                body.assignment_id, telemetry=telemetry, trace=trace
+            )
         except (KeyError, RuntimeError) as exc:
             status = 404 if isinstance(exc, KeyError) else 409
             return JSONResponse(
@@ -129,6 +144,7 @@ def create_app(
             else "cached"
             if telemetry.model_used == "cached-plan"
             else "ai",
+            agent_reasoning_trace=trace,
         )
 
     @app.post("/api/sync", response_model=TerminalState)

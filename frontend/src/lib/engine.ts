@@ -2,7 +2,9 @@
 // Everything here is deterministic given `now`, so the client sandbox and the
 // live backend render through the same math.
 
+import { minutes, signed } from "@/lib/format";
 import type {
+  AgentReasoningStep,
   Assignment,
   AssignmentStatus,
   Course,
@@ -410,6 +412,308 @@ export function rubricBreakdown(
       detail: match[3]?.trim() || null,
     };
   });
+}
+
+// --------------------------------------------------- agent reasoning trace
+// Mirrors backend/ai_engine.py so an offline triage audits its plan the same way.
+
+export type TraceStatus = AgentReasoningStep["status"];
+
+const TRACE_TITLES = [
+  "INGEST & AUDIT",
+  "CAPACITY CHECK",
+  "CRITICAL PATH",
+  "VERIFICATION",
+] as const;
+const SEVERITY: Record<TraceStatus, number> = { pass: 0, watch: 1, risk: 2 };
+const TIER_STATUS: Record<PriorityTier, TraceStatus> = {
+  high: "risk",
+  medium: "watch",
+  low: "pass",
+};
+/** Share of the clock time left before the deadline that open work needs; 25% is ~6h a day. */
+const LOAD_WATCH = 0.25;
+const LOAD_RISK = 0.5;
+
+export interface GradeRisk {
+  /** Lowest score on this deliverable that keeps the course on target; null without a grade or weight. */
+  floor: number | null;
+  tier: PriorityTier;
+}
+
+/**
+ * The break-even score for one assignment (projectGrade with only it open):
+ * other work held at the current grade. A high floor is a heavy risk weight.
+ */
+export function gradeRisk(
+  assignment: Pick<Assignment, "weight">,
+  course: Pick<Course, "current_score" | "target_score"> | null,
+): GradeRisk {
+  const current = course?.current_score ?? null;
+  const { weight } = assignment;
+  const floor =
+    course && current !== null && weight > 0
+      ? current - ((current - course.target_score) * 100) / weight
+      : null;
+  const tier: PriorityTier =
+    floor === null
+      ? weight >= 20
+        ? "high"
+        : weight >= 10
+          ? "medium"
+          : "low"
+      : floor >= 85
+        ? "high"
+        : floor >= 60
+          ? "medium"
+          : "low";
+  return { floor, tier };
+}
+
+export function floorText(
+  floor: number | null,
+  course: Pick<Course, "current_score" | "target_score"> | null,
+): string {
+  if (floor === null || !course || course.current_score === null) {
+    return course?.current_score == null
+      ? "no course grade posted yet · weight alone sets the risk"
+      : "unweighted deliverable · no grade exposure";
+  }
+  const target = `${course.target_score.toFixed(1)} target`;
+  const margin = signed(course.current_score - course.target_score);
+  if (floor > 100)
+    return `${floor.toFixed(1)}% needed: the ${target} is out of reach on this deliverable alone`;
+  if (floor <= 0) return `any score holds the ${target} (margin ${margin})`;
+  return `score ≥ ${floor.toFixed(1)}% holds the ${target} (margin ${margin})`;
+}
+
+export interface TriageContext {
+  now: number;
+  course: Course | null;
+  /** Estimated minutes open on other active work due by this deadline (all of it if undated). */
+  queued: number;
+  /** Estimated minutes open on every other active assignment. */
+  openBudget: number;
+  history: VelocityFills;
+}
+
+export function triageContext(
+  state: Pick<TerminalState, "courses" | "assignments">,
+  assignment: Assignment,
+  now: number,
+): TriageContext {
+  const due = Date.parse(assignment.due_at ?? "");
+  let queued = 0;
+  let openBudget = 0;
+  for (const other of state.assignments) {
+    if (!isActive(other) || other.id === assignment.id) continue;
+    const otherDue = Date.parse(other.due_at ?? "");
+    for (const leaf of leaves(other.subtasks)) {
+      if (leaf.is_completed) continue;
+      openBudget += leaf.estimated_minutes;
+      if (Number.isNaN(due) || otherDue <= due)
+        queued += leaf.estimated_minutes;
+    }
+  }
+  return {
+    now,
+    course: state.courses.find((c) => c.id === assignment.course_id) ?? null,
+    queued,
+    openBudget,
+    history: velocityFills(state.assignments),
+  };
+}
+
+const plural = (count: number, noun: string) =>
+  `${count} ${noun}${count === 1 ? "" : "s"}`;
+const worst = (...statuses: TraceStatus[]) =>
+  statuses.reduce((a, b) => (SEVERITY[b] > SEVERITY[a] ? b : a));
+const percent = (share: number) => `${Math.round(share * 100)}%`;
+
+function load(mins: number, hours: number): [number, TraceStatus] {
+  const share = mins / 60 / hours;
+  return [
+    share,
+    share >= LOAD_RISK ? "risk" : share >= LOAD_WATCH ? "watch" : "pass",
+  ];
+}
+
+function traceStep(
+  step: number,
+  status: TraceStatus,
+  summary: string,
+  evidence: string[],
+  engine: string,
+  latency_ms: number,
+): AgentReasoningStep {
+  return {
+    step,
+    title: TRACE_TITLES[step - 1],
+    status,
+    summary,
+    evidence: evidence.slice(0, 6),
+    engine,
+    latency_ms,
+  };
+}
+
+/**
+ * The four-step agent trace over a finished plan: INGEST & AUDIT, CAPACITY
+ * CHECK, CRITICAL PATH (the planner's own step), VERIFICATION. Every number is
+ * computed here from terminal state, never taken from model output.
+ */
+export function reasoningTrace(
+  assignment: Assignment,
+  context: TriageContext,
+  subtasks: SubTaskNode[],
+  planner: { engine: string; latency_ms: number },
+): AgentReasoningStep[] {
+  const { course, queued, openBudget, history } = context;
+  const hours = hoursUntil(assignment.due_at, context.now);
+  const margin =
+    course && course.current_score !== null
+      ? course.current_score - course.target_score
+      : null;
+
+  // [01] Rubric constraints and point-weight risk.
+  const constraints = rubricBreakdown(assignment).map(
+    (line) =>
+      `${line.criterion} ${line.percent}% (${Math.round(line.points * 10) / 10} pts)`,
+  );
+  const risk = gradeRisk(assignment, course);
+  const rubric = constraints.slice(0, 3).map((line) => `RUBRIC ${line}`);
+  if (constraints.length > 3) rubric[2] += ` · +${constraints.length - 3} more`;
+  if (!constraints.length)
+    rubric.push(
+      "RUBRIC no weighted criteria in the prompt · graded holistically",
+    );
+  const ingest = traceStep(
+    1,
+    TIER_STATUS[risk.tier],
+    `${constraints.length ? plural(constraints.length, "rubric constraint") : "Holistic rubric"} · ${assignment.weight.toFixed(1)}% of grade · ${risk.tier.toUpperCase()} risk weight`,
+    [
+      ...rubric,
+      `WEIGHT ${assignment.weight.toFixed(1)}% of final grade${
+        assignment.points_possible
+          ? ` · ${(assignment.weight / assignment.points_possible).toFixed(3)}% per point`
+          : ""
+      }`,
+      `FLOOR ${floorText(risk.floor, course)}`,
+    ],
+    "rubric-parser",
+    0,
+  );
+
+  // [02] Margin of safety against the open budget competing for this deadline.
+  let capacityStatus: TraceStatus =
+    margin !== null && margin < 0 ? "watch" : "pass";
+  const capacityEvidence = [
+    margin !== null
+      ? `MARGIN ${signed(margin)} pts vs the ${course!.target_score.toFixed(1)} target`
+      : "MARGIN no course grade posted yet",
+    `OPEN BUDGET ${minutes(openBudget)} across other active work`,
+  ];
+  let capacityLoad: string;
+  if (hours === null) {
+    capacityEvidence.push("WINDOW no due date · load is not time-boxed");
+    capacityLoad = "no deadline";
+  } else if (hours <= 0) {
+    capacityEvidence.push(`WINDOW deadline passed ${minutes(-hours * 60)} ago`);
+    capacityStatus = "risk";
+    capacityLoad = "overdue";
+  } else {
+    const [share, status] = load(queued, hours);
+    capacityStatus = worst(capacityStatus, status);
+    capacityEvidence.push(
+      `QUEUED ${minutes(queued)} of other work due by this deadline`,
+      `LOAD ${percent(share)} of the ${minutes(hours * 60)} window before this plan`,
+    );
+    capacityLoad = `${percent(share)} window load`;
+  }
+  const capacity = traceStep(
+    2,
+    capacityStatus,
+    `${margin !== null ? `Margin ${signed(margin)}` : "No grade yet"} · ${minutes(openBudget)} open budget · ${capacityLoad}`,
+    capacityEvidence,
+    "capacity-engine",
+    0,
+  );
+
+  // [03] The plan as an execution sequence of atomic 15–45 minute tasks.
+  const all = leaves(subtasks);
+  const open = all.filter((leaf) => !leaf.is_completed);
+  const remaining = open.reduce((sum, leaf) => sum + leaf.estimated_minutes, 0);
+  const outside = all.filter(
+    (leaf) => leaf.estimated_minutes < 15 || leaf.estimated_minutes > 45,
+  ).length;
+  const pathEvidence = [
+    `SEQUENCE ${plural(subtasks.length, "phase")} → ${plural(all.length, "atomic task")} · ${minutes(rollup(subtasks).estimated)}`,
+  ];
+  if (open.length) {
+    pathEvidence.push(
+      `START ${open[0].title} (${minutes(open[0].estimated_minutes)})`,
+    );
+    if (open.length > 1) pathEvidence.push(`FINISH ${open.at(-1)!.title}`);
+  }
+  pathEvidence.push(
+    outside
+      ? `BOUNDS ${plural(outside, "task")} outside 15–45m`
+      : "BOUNDS every task inside 15–45m",
+  );
+  const path = traceStep(
+    3,
+    outside ? "watch" : "pass",
+    `${plural(all.length, "atomic task")} sequenced · ${minutes(remaining)} open`,
+    pathEvidence,
+    planner.engine,
+    planner.latency_ms,
+  );
+
+  // [04] Re-price the plan at the student's historical Completion Velocity.
+  const velocity = history.velocity;
+  const adjusted = velocity ? (remaining * 100) / velocity : remaining;
+  let verifyStatus: TraceStatus =
+    velocity !== null && velocityTier(velocity) === "overrun"
+      ? "watch"
+      : "pass";
+  const verifyEvidence = [
+    velocity === null
+      ? "VELOCITY no completed tasks yet · estimates taken at face value"
+      : `VELOCITY ${velocity.toFixed(0)}% over ${plural(history.fills, "completed task")} (${minutes(history.estimated)} est / ${minutes(history.actual)} act)`,
+    `ADJUSTED plan ${minutes(remaining)} → ${minutes(adjusted)} at this pace`,
+  ];
+  let verifyLoad: string;
+  if (hours === null) {
+    verifyLoad = "no deadline";
+  } else if (hours <= 0) {
+    verifyStatus = "risk";
+    verifyEvidence.push(
+      "DEADLINE passed · secure the highest-weighted criteria first",
+    );
+    verifyLoad = "overdue";
+  } else {
+    const needed = queued + adjusted;
+    const [share, status] = load(needed, hours);
+    verifyStatus = worst(verifyStatus, status);
+    const slack = hours * 60 - needed;
+    verifyEvidence.push(
+      `LOAD ${percent(share)} of the window with this plan`,
+      slack >= 0
+        ? `SLACK ${minutes(slack)} of clock time after queued work and this plan`
+        : `SHORTFALL ${minutes(-slack)} more work than clock time`,
+    );
+    verifyLoad = `${percent(share)} window load`;
+  }
+  const verify = traceStep(
+    4,
+    verifyStatus,
+    `${minutes(adjusted)} at ${velocity !== null ? `${velocity.toFixed(0)}% velocity` : "face-value estimates"} · ${verifyLoad}`,
+    verifyEvidence,
+    "velocity-auditor",
+    0,
+  );
+
+  return [ingest, capacity, path, verify];
 }
 
 // ------------------------------------------------------- study fallback §4.4

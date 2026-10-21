@@ -26,7 +26,11 @@ Settings come from process environment variables. The service does not read `.en
 | `LLM_MODEL` | `llama3` | Exact model name served by the endpoint |
 | `META_API_KEY` | unset | Enables Meta inference; takes priority over `LLM_*` |
 | `META_BASE_URL` | `https://api.llama.com/compat/v1` | OpenAI-compatible base URL for Meta or your hosted Llama deployment |
-| `META_MODEL` | `Llama-3.3-70B-Instruct` | Alternatively `Llama-3.1-8B-Instruct`, or the exact model served by your endpoint |
+| `META_MODEL` | `Llama-3.3-70B-Instruct` | The primary triage agent; any model ID your endpoint serves, such as `Llama-3.1-8B-Instruct`, a Llama 4 model, `muse-spark`, or `muse-wonder` |
+| `AUDITOR_API_KEY` | unset | Enables the optional fast rubric pre-filter pass (step 01 of the triage agent); without it the agent parses the rubric itself |
+| `AUDITOR_BASE_URL` | `https://api.deepseek.com/v1` | OpenAI-compatible base URL for the pre-filter model |
+| `AUDITOR_MODEL` | `deepseek-flash` | Exact pre-filter model ID served by that endpoint |
+| `AUDITOR_TIMEOUT_SECONDS` | `6` | Pre-filter deadline; on timeout or an invalid reply the rubric parser is used |
 | `LLM_TIMEOUT_SECONDS` | `15` | Overall planning deadline; bounded to 120 seconds |
 | `CANVAS_TIMEOUT_SECONDS` | `2.5` | Per-request Canvas deadline; a slower page switches the sync to the sandbox |
 | `APEX_WORKSPACE_ID` | `default` | Snapshot namespace for this deployment |
@@ -76,7 +80,7 @@ Courses with no active assignments receive a `Rapid Study Action`. Recommendatio
 | `GET` | `/api/state` | Full state; cached Canvas data and recalculated priorities/metrics |
 | `POST` | `/api/sync` | Full state after a forced refresh and optional Supabase save |
 | `POST` | `/api/triage/{assignment_id}` | JSON array of root `SubTaskNode` objects, with nested `children` |
-| `POST` | `/api/decompose` or `/decompose` | Body `{ "assignment_id": "..." }`; returns `{ subtasks, source, telemetry }` |
+| `POST` | `/api/decompose` or `/decompose` | Body `{ "assignment_id": "..." }`; returns `{ subtasks, source, telemetry, agent_reasoning_trace }` |
 | `GET` | `/api/engine` | Configured provider and model; never credentials |
 | `PATCH` | `/api/v1/subtasks/{subtask_id}` | Full updated state, including recalculated metrics; mirrors the tree and appends a time log in Supabase |
 | `PATCH` | `/api/subtasks/{subtask_id}` | Deprecated alias of the v1 route, kept for older terminals |

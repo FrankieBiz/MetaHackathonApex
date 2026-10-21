@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from backend.main import create_app
-from backend.models import SubTaskUpdate
+from backend.models import InferenceTelemetry, SubTaskUpdate
 from backend.tasks import walk
 
 from .conftest import MemoryStore, service_context, settings
@@ -63,6 +63,14 @@ async def test_decompose_returns_telemetry_and_preserves_triage_contract(api):
         "tokens_per_sec",
     }
     assert result["telemetry"]["model_used"] == "local-starter-plan"
+    trace = result["agent_reasoning_trace"]
+    assert [(step["step"], step["title"]) for step in trace] == [
+        (1, "INGEST & AUDIT"),
+        (2, "CAPACITY CHECK"),
+        (3, "CRITICAL PATH"),
+        (4, "VERIFICATION"),
+    ]
+    assert trace[2]["engine"] == "local-starter-plan"
     assert (await api.post("/api/triage/math4102-queue")).json() == result["subtasks"]
     missing = await api.post("/api/decompose", json={"assignment_id": "missing"})
     assert missing.status_code == 404
@@ -71,7 +79,7 @@ async def test_decompose_returns_telemetry_and_preserves_triage_contract(api):
     assert invalid.status_code == 422
     assert invalid.json()["telemetry"]["model_used"] == "none"
     engine = (await api.get("/api/engine")).json()
-    assert engine == {"provider": "llama", "model": "llama3"}
+    assert engine == {"provider": "llama", "model": "llama3", "auditor": "rubric-parser"}
 
 
 async def test_parent_child_completion_reopen_and_metrics(api):
@@ -353,7 +361,10 @@ async def test_triage_keeps_progress_recorded_while_model_is_running():
         state = await service.state()
         baseline = state.metrics.total_actual_minutes
         assignment = next(a for a in state.assignments if a.id == "math4102-exam")
-        pending = asyncio.create_task(service.triage(assignment.id))
+        telemetry, trace = InferenceTelemetry(), []
+        pending = asyncio.create_task(
+            service.triage(assignment.id, telemetry=telemetry, trace=trace)
+        )
         await asyncio.wait_for(started.wait(), timeout=1)
         try:
             await service.patch(assignment.subtasks[0].id, SubTaskUpdate(actual_minutes=7))
@@ -362,6 +373,12 @@ async def test_triage_keeps_progress_recorded_while_model_is_running():
         result = await pending
         assert result[0].actual_minutes == 7
         assert (await service.state()).metrics.total_actual_minutes == baseline + 7
+        # The saved plan came back, so the trace and telemetry describe it, not the discarded one.
+        assert telemetry.model_used == "cached-plan"
+        assert trace[2].engine == "cached-plan"
+        assert "SAVED PLAN work is already logged on it, so it was kept" in trace[2].evidence
+        kept_leaves = [node for node in walk(result) if not node.children]
+        assert trace[2].summary.startswith(f"{len(kept_leaves)} atomic tasks sequenced")
 
 
 async def test_unchecking_partly_done_parent_mirrors_the_cascade(api, terminal):

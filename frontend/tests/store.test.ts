@@ -1,7 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { findNode, leaves, velocityByCourse } from "@/lib/engine";
 import { createMockState } from "@/lib/mockData";
-import type { SubTaskNode, TerminalState } from "@/types";
+import type { AgentReasoningStep, SubTaskNode, TerminalState } from "@/types";
+
+/** The backend agent's four steps, as /api/decompose returns them. */
+const BACKEND_TRACE: AgentReasoningStep[] = [
+  "INGEST & AUDIT",
+  "CAPACITY CHECK",
+  "CRITICAL PATH",
+  "VERIFICATION",
+].map((title, index) => ({
+  step: index + 1,
+  title,
+  status: index === 0 ? "risk" : "pass",
+  summary: `${title} summary`,
+  evidence: [`${title} evidence`],
+  engine: index === 2 ? "Llama-3.3-70B-Instruct" : "capacity-engine",
+  latency_ms: index === 2 ? 500 : 0,
+}));
 
 /** In-memory stand-in for the FastAPI backend, shaped like its real responses. */
 function fakeBackend() {
@@ -14,6 +30,8 @@ function fakeBackend() {
     /** Feed requests never answer; only their abort signal ends them. */
     hang: false,
     triageStatus: 200,
+    /** False: answer /api/decompose like a backend that predates the agent trace. */
+    trace: true,
     /** When set, GET /api/state snapshots immediately but answers only after this resolves. */
     gate: null as Promise<void> | null,
     /** When set, PATCH answers only after this resolves. */
@@ -108,6 +126,7 @@ function fakeBackend() {
           completion_tokens: 100,
           tokens_per_sec: 200,
         },
+        ...(backend.trace ? { agent_reasoning_trace: BACKEND_TRACE } : {}),
       });
     }
     return reply({ detail: "Not Found" }, 404);
@@ -118,6 +137,18 @@ function fakeBackend() {
 async function loadStore() {
   vi.resetModules();
   return (await import("@/store/terminal")).useTerminal;
+}
+
+/** Runs a triage through its streaming windows on fake timers. */
+async function triageNow(
+  store: Awaited<ReturnType<typeof loadStore>>,
+  assignmentId: string,
+) {
+  vi.useFakeTimers({ toFake: ["setTimeout"] });
+  const run = store.getState().triage(assignmentId);
+  await vi.advanceTimersByTimeAsync(5000);
+  await run;
+  vi.useRealTimers();
 }
 
 const RAFT = "cs3801-raft";
@@ -161,11 +192,81 @@ describe("terminal store against the backend", () => {
   it("uses the backend's tree when triage succeeds", async () => {
     const store = await loadStore();
     await store.getState().boot();
-    await store.getState().triage(UNTRIAGED);
+    await triageNow(store, UNTRIAGED);
     const subtasks = store
       .getState()
       .data!.assignments.find((a) => a.id === UNTRIAGED)!.subtasks;
     expect(subtasks.map((n) => n.id)).toEqual([`${UNTRIAGED}-remote-1`]);
+  });
+
+  it("streams the backend agent's trace before revealing the tree", async () => {
+    const store = await loadStore();
+    await store.getState().boot();
+    const { TRIAGE_STREAM_MS, TRACE_STEP_MS } =
+      await import("@/store/terminal");
+    const tree = () =>
+      store.getState().data!.assignments.find((a) => a.id === UNTRIAGED)!
+        .subtasks;
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    const run = store.getState().triage(UNTRIAGED);
+    expect(store.getState().triaging[UNTRIAGED]).toBeGreaterThan(0);
+    await vi.advanceTimersByTimeAsync(TRIAGE_STREAM_MS);
+    // The trace is on screen; the tree waits for its four steps.
+    expect(store.getState().traces[UNTRIAGED]).toEqual({
+      steps: BACKEND_TRACE,
+      source: "ai",
+      telemetry: expect.objectContaining({ tokens_per_sec: 200 }),
+    });
+    expect(tree()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(TRACE_STEP_MS * 4);
+    await run;
+    expect(tree()).toHaveLength(1);
+    expect(store.getState().triaging).toEqual({});
+    // A risk step keeps the completion line amber rather than green.
+    expect(store.getState().events[0]).toMatchObject({ level: "warn" });
+    expect(store.getState().events[0].text).toMatch(/flagged 1 risk step/);
+  });
+
+  it("discards a run whose dataset is swapped mid-stream", async () => {
+    const store = await loadStore();
+    await store.getState().boot();
+    const { TRIAGE_STREAM_MS, TRACE_STEP_MS } =
+      await import("@/store/terminal");
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    const run = store.getState().triage(UNTRIAGED);
+    await vi.advanceTimersByTimeAsync(TRIAGE_STREAM_MS);
+    expect(store.getState().traces[UNTRIAGED]).toBeDefined();
+    // Ctrl+Shift+D while the trace streams: the backend tree must not land in the sandbox.
+    await store.getState().toggleSimulation();
+    await vi.advanceTimersByTimeAsync(TRACE_STEP_MS * 4);
+    await run;
+    const state = store.getState();
+    expect(state.origin).toBe("sandbox");
+    expect(
+      state.data!.assignments.find((a) => a.id === UNTRIAGED)!.subtasks,
+    ).toEqual([]);
+    expect(state.traces[UNTRIAGED]).toBeUndefined();
+    expect(state.triaging).toEqual({});
+    expect(state.events[0].text).toMatch(/discarded: the dataset changed/);
+  });
+
+  it("builds the trace itself when the backend predates the agent", async () => {
+    fake.backend.trace = false;
+    const store = await loadStore();
+    await store.getState().boot();
+    await triageNow(store, UNTRIAGED);
+    const trace = store.getState().traces[UNTRIAGED];
+    expect(trace.steps.map((step) => step.title)).toEqual([
+      "INGEST & AUDIT",
+      "CAPACITY CHECK",
+      "CRITICAL PATH",
+      "VERIFICATION",
+    ]);
+    expect(trace.steps[2]).toMatchObject({
+      engine: "Llama-3.3-70B-Instruct",
+      latency_ms: 500,
+    });
+    expect(trace.source).toBe("ai");
   });
 
   it("says the saved plan was kept when the backend won't replace a tree with logged work", async () => {
@@ -174,8 +275,12 @@ describe("terminal store against the backend", () => {
     const tree = () =>
       store.getState().data!.assignments.find((a) => a.id === RAFT)!.subtasks;
     const before = tree();
-    await store.getState().triage(RAFT);
+    await triageNow(store, RAFT);
     expect(tree()).toEqual(before);
+    expect(store.getState().traces[RAFT]).toMatchObject({
+      source: "cached",
+      telemetry: null,
+    });
     expect(store.getState().events[0]).toMatchObject({ level: "info" });
     expect(store.getState().events[0].text).toMatch(/kept the saved plan/i);
   });
@@ -276,7 +381,8 @@ describe("terminal store without a backend", () => {
     await store.getState().boot();
     expect(store.getState().mode).toBe("offline");
     // The footer headline is the sandbox status, not the unreachable-API cause.
-    const { SANDBOX_READY } = await import("@/store/terminal");
+    const { SANDBOX_READY, TRIAGE_STREAM_MS } =
+      await import("@/store/terminal");
     const [headline, cause] = store.getState().events;
     expect(headline).toMatchObject({ level: "ok", text: SANDBOX_READY });
     expect(cause).toMatchObject({ level: "info" });
@@ -285,10 +391,7 @@ describe("terminal store without a backend", () => {
     expect(store.getState().events[0].text).toBe(SANDBOX_READY);
     expect(store.getState().events.some((e) => e.level === "warn")).toBe(false);
 
-    vi.useFakeTimers({ toFake: ["setTimeout"] });
-    const run = store.getState().triage(UNTRIAGED);
-    await vi.advanceTimersByTimeAsync(2000);
-    await run;
+    await triageNow(store, UNTRIAGED);
 
     const subtasks = store
       .getState()
@@ -296,6 +399,42 @@ describe("terminal store without a backend", () => {
     expect(subtasks.length).toBeGreaterThan(0);
     expect(subtasks[0].id).toMatch(/^local-/);
     expect(store.getState().queuedEdits).toBe(0);
+    // The local planner is audited too, with no model throughput claimed.
+    const trace = store.getState().traces[UNTRIAGED];
+    expect(trace).toMatchObject({ source: "local", telemetry: null });
+    expect(trace.steps[2].engine).toBe("local-planner");
+    // Planning time only; the log's display delay is not reported as latency.
+    expect(trace.steps[2].latency_ms).toBeLessThan(TRIAGE_STREAM_MS);
+    // Below-target MATH 4102 cannot reach 90 on this project alone: amber, never red.
+    expect(trace.steps[0].status).toBe("risk");
+    expect(store.getState().events[0].level).toBe("warn");
+    expect(store.getState().events.some((e) => e.level === "error")).toBe(
+      false,
+    );
+  });
+});
+
+describe("terminal store when the backend returns mid-triage", () => {
+  it("drops the local plan instead of grafting local ids onto backend data", async () => {
+    fake.backend.down = true;
+    const store = await loadStore();
+    await store.getState().boot();
+    const { TRIAGE_STREAM_MS, TRACE_STEP_MS } =
+      await import("@/store/terminal");
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    const run = store.getState().triage(UNTRIAGED);
+    await vi.advanceTimersByTimeAsync(TRIAGE_STREAM_MS);
+    expect(store.getState().traces[UNTRIAGED].source).toBe("local");
+    fake.backend.down = false;
+    expect(await store.getState().refresh()).toBe(true);
+    expect(store.getState().mode).toBe("backend-demo");
+    await vi.advanceTimersByTimeAsync(TRACE_STEP_MS * 4);
+    await run;
+    const subtasks = store
+      .getState()
+      .data!.assignments.find((a) => a.id === UNTRIAGED)!.subtasks;
+    expect(subtasks).toEqual([]);
+    expect(store.getState().triaging).toEqual({});
   });
 });
 
