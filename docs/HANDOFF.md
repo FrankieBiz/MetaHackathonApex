@@ -75,30 +75,48 @@
 
 ---
 
-## 3. Strict Operating Rules & Constraints
+## 3. Orchestration Framework & Strict Model Rules
 
-The incoming agent must adhere to the following non-negotiable rules:
+The user has mandated an exact multi-model orchestration division and strictly prohibited older or lower-tier models. The incoming assistant MUST follow these specifications:
 
-1. **Report Models Used at the Top of Every Response**:
-   - Always state the models used at the very beginning of every user turn.
-2. **Mandated Frontier Models Only**:
-   - **OpenAI Codex**: Use only `gpt-6` or `gpt-6.1` (`gpt-6.1-sol`, high effort).
-   - **Anthropic Claude**: Use only latest frontier tier (`opus`, high reasoning).
-   - **DeepSeek**: Permitted to use `deepseek-v4.1-flash` via active API credit pool for fast extraction/fuzzing.
-   - **Strict Prohibition on Older Models**: Never use Claude 3.5, GPT-4o, or lower-tier models.
-3. **NO DIAGRAMS**:
-   - Never generate Mermaid diagrams or ASCII text-box art blocks. Use markdown lists, tables, or plain prose instead.
-4. **Mandatory Finish Protocol**:
-   - Verify: `make check`.
-   - Commit author/committer must be strictly: `FrankieBiz <frankabisignano@gmail.com>`.
-   - NEVER include AI names (Claude, ChatGPT, Gemini, Anthropic, OpenAI) or `Co-Authored-By` lines.
-   - Push to both remotes:
-     ```bash
-     git add -A
-     git commit -m "<imperative commit message>"
-     git push origin HEAD:main
-     git push metahackathon HEAD:main
-     ```
+### 3.1 Response Format Requirement
+- **Always State Models Used First**: The very first block of every single response to the user must explicitly list which models were called and their roles:
+  ```markdown
+  ### Models Used:
+  - **OpenAI GPT-6.1** (`gpt-6.1-sol` via Codex): Backend engineering...
+  - **Anthropic Claude** (`opus` with high-effort reasoning): Frontend engineering...
+  - **DeepSeek** (`deepseek-v4.1-flash`): High-throughput extraction / fuzzing...
+  ```
+
+### 3.2 Mandated Model Tiers (Strict Prohibition on Older Tiers)
+- **STRICTLY FORBIDDEN**: Never orchestrate with older or lower-tier models (no Claude 3.5 Sonnet, no GPT-4o, no legacy tiers).
+- **OpenAI / Codex Tier**: Use ONLY `gpt-6` or `gpt-6.1` (specifically `gpt-6.1-sol`, `gpt-6-astra`, high effort).
+- **Anthropic / Claude Tier**: Use ONLY the highest frontier tier available (e.g., Claude Opus / highest reasoning tier).
+- **DeepSeek Tier**: Permitted and encouraged to utilize `deepseek-v4.1-flash` (or DeepSeek V3/R1 flash via the user's active $9 API credit pool `DEEPSEEK_API_KEY`) for rapid fuzzing, extraction, and auditor passes.
+
+### 3.3 Functional Division of Labor
+- **OpenAI GPT-6.1 (`gpt-6.1-sol`)**:
+  - Assigned to **Deep Backend Engineering**: Pydantic v2 schemas (`backend/models.py`), FastAPI service logic (`backend/service.py`), Meta Model API integration (`backend/ai_engine.py`), strict type safety, algorithm verification, and backend test suites (`backend/tests/`).
+- **Anthropic Claude (`opus` / high reasoning)**:
+  - Assigned to **Frontend Terminal Ergonomics & UX**: React/Next.js 16 UI components (`frontend/src/components/`), Web Audio/Speech synthesis, terminal typography, keyboard navigation hotkeys, Vitest suites (`frontend/tests/`), and hackathon presentation/narrative.
+- **DeepSeek (`deepseek-v4.1-flash`)**:
+  - Assigned to **High-Throughput Extraction & Rapid Auditing**: Batch rubric extraction, fast fuzzing of test boundaries, rapid token scanning, and second-pass code auditing using the user's active $9 credit balance.
+- **Antigravity (Coordinator)**:
+  - Oversees the autonomous perfection loop: plans the feature DAG, partitions file boundaries to prevent merge conflicts, dispatches parallel workers via Orca orchestration (`orca orchestration worker-start` / `dispatch`), monitors progress reactively, executes verification gates (`make check`), and runs the zero-AI git finish protocol.
+
+### 3.4 Autonomous Perfection Loop Protocol
+- **Autonomous Execution**: When in loop mode, the coordinator plans what needs to be done, dispatches the frontier models to execute, reviews their outputs, validates the full test suite (`make check`), and pushes to main. Do not pause for routine confirmation—proceed autonomously while periodically grounding to ensure architectural alignment.
+- **No Diagrams Rule**: Never generate Mermaid diagrams or ASCII/plaintext diagram boxes. All concepts, workflows, and architectures must be presented in markdown lists, tables, or clean prose.
+- **Mandatory Git Finish Protocol**:
+  - Author/Committer must strictly be `FrankieBiz <frankabisignano@gmail.com>`.
+  - Zero AI names (Claude, ChatGPT, Gemini, Anthropic, OpenAI) and zero `Co-Authored-By` lines.
+  - Push directly to both remotes:
+    ```bash
+    git add -A
+    git commit -m "<imperative commit message>"
+    git push origin HEAD:main
+    git push metahackathon HEAD:main
+    ```
 
 ---
 
