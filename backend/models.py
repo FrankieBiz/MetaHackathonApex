@@ -463,3 +463,10 @@ class StudyTriagePlan(StrictModel):
 class StudyInsertRequest(StrictModel):
     course_id: Identifier
     recommended_blocks: StudyBlocks
+
+
+class CalendarExportRequest(StrictModel):
+    include_study_blocks: bool = True
+    include_alarms: bool = True
+    include_completed: bool = False
+    course_id: Identifier | None = None

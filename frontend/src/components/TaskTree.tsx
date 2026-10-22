@@ -2,6 +2,7 @@
 
 import { Fragment, useState } from "react";
 import { DefenseCouncil } from "@/components/DefenseCouncil";
+import { useCalendarExport } from "@/components/CalendarExportModal";
 import { useNegotiator } from "@/components/NegotiationModal";
 import { Key, Meter, Panel, Spinner, TRACE_STATUS } from "@/components/ui";
 import { useNow } from "@/hooks/useNow";
@@ -677,13 +678,21 @@ export function TaskTree() {
               </Key>
             ))}
           </div>
-          <Key
-            className="ml-auto"
-            onClick={() => useNegotiator.getState().open(assignment.id)}
-            title="Office hours negotiator: extension request, regrade petition, or a 60-second office hours pitch (hotkey O)"
-          >
-            ☎ NEGOTIATE
-          </Key>
+          <div className="ml-auto flex items-center gap-1.5">
+            <Key
+              onClick={() => useCalendarExport.getState().setOpen(true, assignment.course_id)}
+              title="Export deliverable and focus blocks to calendar (.ics / Google Calendar)"
+              aria-label="Export to calendar"
+            >
+              📅 CALENDAR
+            </Key>
+            <Key
+              onClick={() => useNegotiator.getState().open(assignment.id)}
+              title="Office hours negotiator: extension request, regrade petition, or a 60-second office hours pitch (hotkey O)"
+            >
+              ☎ NEGOTIATE
+            </Key>
+          </div>
         </div>
 
         {tab === "council" ? (

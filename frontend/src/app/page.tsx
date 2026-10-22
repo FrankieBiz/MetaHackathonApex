@@ -14,6 +14,7 @@ import { OrderBook } from "@/components/OrderBook";
 import { TaskTree } from "@/components/TaskTree";
 import { TokenModal } from "@/components/TokenModal";
 import { TopBar } from "@/components/TopBar";
+import { useCalendarExport } from "@/components/CalendarExportModal";
 import { useMarginCall } from "@/components/MarginCallModal";
 import { openMorningBell } from "@/components/MorningBell";
 import { useNegotiator } from "@/components/NegotiationModal";
@@ -157,6 +158,15 @@ function useHotkeys() {
         if (state.data) {
           event.preventDefault();
           useDossier.getState().setOpen(true);
+        }
+        return;
+      }
+
+      // Academic calendar export desk (C)
+      if (key === "c" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        if (state.data) {
+          event.preventDefault();
+          useCalendarExport.getState().setOpen(true);
         }
         return;
       }

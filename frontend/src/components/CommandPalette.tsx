@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useEscape, useRestoreFocus } from "@/components/ui";
 import { useSyllabusIngest } from "@/components/SyllabusIngestModal";
 import { useMonteCarlo } from "@/components/MonteCarloModal";
+import { useCalendarExport } from "@/components/CalendarExportModal";
 import { useMarginCall } from "@/components/MarginCallModal";
 import { openMorningBell } from "@/components/MorningBell";
 import { useNegotiator } from "@/components/NegotiationModal";
@@ -182,6 +183,13 @@ function PaletteDialog({
       hint: "Executive memo, audit metrics, copy / download / print",
       shortcut: "R",
       run: () => useDossier.getState().setOpen(true),
+    });
+    actions.push({
+      id: "calendar-export",
+      label: "CALENDAR EXPORT: .ICS & WEBCAL FEED",
+      hint: "Download RFC 5545 .ics schedule or copy live webcal:// feed URL",
+      shortcut: "C",
+      run: () => useCalendarExport.getState().setOpen(true),
     });
     actions.push({
       id: "margin-call",

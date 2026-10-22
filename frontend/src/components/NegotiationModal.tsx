@@ -17,6 +17,7 @@ import {
   useRestoreFocus,
 } from "@/components/ui";
 import { api, type NegotiationRun } from "@/lib/api";
+import { googleCalendarUrl } from "@/lib/calendarExport";
 import { evaluateCircuitBreaker } from "@/lib/circuitBreaker";
 import { speakLines, type SpeechRun } from "@/lib/morningBell";
 import {
@@ -584,6 +585,19 @@ function NegotiatorDialog({
                       </Key>
                       <Key onClick={() => void copy(pitchText(beats), "pitch")}>
                         COPY PITCH
+                      </Key>
+                      <Key
+                        onClick={() => {
+                          const url = googleCalendarUrl({
+                            title: `[OFFICE HOURS] ${assignment.course_code}: ${assignment.title}`,
+                            description: `Office Hours Discussion & Talking Points:\n\n${pitchText(beats)}`,
+                            start: new Date(Date.now() + 86400000),
+                          });
+                          window.open(url, "_blank", "noopener,noreferrer");
+                        }}
+                        title="Add this office hours discussion to Google Calendar"
+                      >
+                        📅 +CAL OFFICE HOURS ↗
                       </Key>
                       {voiceless && (
                         <span className="text-[10px] tracking-wider text-ink-3 uppercase">

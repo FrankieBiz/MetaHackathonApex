@@ -16,6 +16,7 @@ from .canvas_client import CanvasClient
 from .config import Settings, get_settings
 from .models import (
     AgentReasoningStep,
+    CalendarExportRequest,
     CircuitBreakerStatus,
     DecomposeRequest,
     DecomposeResponse,
@@ -244,6 +245,47 @@ def create_app(
     @app.post("/api/v1/portfolio/circuit-breaker", response_model=CircuitBreakerStatus)
     async def circuit_breaker(request: Request) -> CircuitBreakerStatus:
         return await request.app.state.terminal.circuit_breaker()
+
+    @app.get("/api/v1/portfolio/calendar.ics")
+    @app.get("/api/portfolio/calendar.ics")
+    async def get_calendar_ics(
+        request: Request,
+        include_study_blocks: bool = True,
+        include_alarms: bool = True,
+        include_completed: bool = False,
+        course_id: str | None = None,
+    ) -> Response:
+        ics_text = await request.app.state.terminal.calendar_ics(
+            include_study_blocks=include_study_blocks,
+            include_alarms=include_alarms,
+            include_completed=include_completed,
+            course_id=course_id,
+        )
+        return Response(
+            content=ics_text,
+            media_type="text/calendar; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="apex-academic-schedule.ics"'},
+        )
+
+    @app.post("/api/v1/portfolio/calendar.ics")
+    @app.post("/api/portfolio/calendar.ics")
+    @app.post("/api/v1/portfolio/calendar/export")
+    async def post_calendar_ics(
+        request: Request,
+        body: CalendarExportRequest | None = None,
+    ) -> Response:
+        opts = body or CalendarExportRequest()
+        ics_text = await request.app.state.terminal.calendar_ics(
+            include_study_blocks=opts.include_study_blocks,
+            include_alarms=opts.include_alarms,
+            include_completed=opts.include_completed,
+            course_id=opts.course_id,
+        )
+        return Response(
+            content=ics_text,
+            media_type="text/calendar; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="apex-academic-schedule.ics"'},
+        )
 
     @app.post("/api/v1/triage/{assignment_id}/negotiate", response_model=NegotiationPetition)
     async def negotiate(

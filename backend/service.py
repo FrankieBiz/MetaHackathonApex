@@ -28,6 +28,7 @@ from .ai_engine import (
     task_id,
     triage_context,
 )
+from .calendar_export import generate_ics_calendar
 from .canvas_client import CanvasClient, CanvasSnapshot
 from .config import Settings
 from .models import (
@@ -776,6 +777,23 @@ class TerminalService:
                 else None
             )
         return report
+
+    async def calendar_ics(
+        self,
+        *,
+        include_study_blocks: bool = True,
+        include_alarms: bool = True,
+        include_completed: bool = False,
+        course_id: str | None = None,
+    ) -> str:
+        state = await self.state()
+        return generate_ics_calendar(
+            state,
+            include_study_blocks=include_study_blocks,
+            include_alarms=include_alarms,
+            include_completed=include_completed,
+            course_id=course_id,
+        )
 
     async def _sync(self, *, force: bool = False) -> None:
         snapshot = await self.canvas.sync(force=force)

@@ -23,6 +23,10 @@ import {
 import { NegotiationModal } from "@/components/NegotiationModal";
 import { MonteCarloModal, useMonteCarlo } from "@/components/MonteCarloModal";
 import {
+  CalendarExportModal,
+  useCalendarExport,
+} from "@/components/CalendarExportModal";
+import {
   PortfolioReportModal,
   useDossier,
 } from "@/components/PortfolioReportModal";
@@ -534,6 +538,13 @@ export function TopBar() {
             DOSSIER // MEMO
           </Key>
           <Key
+            onClick={() => useCalendarExport.getState().setOpen(true)}
+            title="Academic Calendar export: download RFC 5545 .ics schedule or copy live webcal:// feed (hotkey C)"
+            aria-label="Open calendar export desk"
+          >
+            CAL // .ICS
+          </Key>
+          <Key
             tone={breaches ? "down" : "default"}
             onClick={() => setMarginCallOpen(true)}
             title={`Margin call desk: breached courses, restoration order, and a WhatsApp alert preview (hotkey M)${
@@ -568,6 +579,7 @@ export function TopBar() {
       <MarginCallModal />
       <NegotiationModal />
       <MorningBellModal />
+      <CalendarExportModal />
     </header>
   );
 }

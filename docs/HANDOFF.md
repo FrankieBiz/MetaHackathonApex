@@ -1,9 +1,9 @@
 # Apex OS — Master Agent Handoff Document
 
-> **Last Updated**: 2026-10-21T20:43:00-04:00  
+> **Last Updated**: 2026-10-22T07:00:00-04:00  
 > **Repository**: `APEX/crayfish`  
 > **Production Branch**: `main` (synced to `origin` and `metahackathon`)  
-> **Verification Status**: 100% Green (`make check` — 729 automated tests passing, 0 failures; Meta Hackathon Judge Scorecard: 100/100 Grade A)
+> **Verification Status**: 100% Green (`make check` — 749 automated tests passing, 0 failures; Meta Hackathon Judge Scorecard: 100/100 Grade A)
 
 ---
 
@@ -14,7 +14,8 @@
   - Meta Model API (`Llama-3.3-70B-Instruct`) integration with prompt-injection defenses and deterministic local fallbacks (`backend/ai_engine.py`).
   - Canvas LMS REST API client with mock sandbox fallback (`backend/canvas_client.py`).
   - SQLite/PostgreSQL Supabase persistence mirror (`backend/persistence.py`).
-  - Test suite: `399 passed` pytest cases (`backend/tests/`).
+  - RFC 5545 iCalendar generation engine (`backend/calendar_export.py`).
+  - Test suite: `409 passed` pytest cases (`backend/tests/`).
 - **Frontend (`frontend/`)**:
   - Next.js 16.4.2 (Turbopack) Bloomberg-style academic financial terminal (`frontend/src/app/page.tsx`).
   - Real-time components:
@@ -26,7 +27,8 @@
     - **Academic Circuit Breaker Banner**: Real-time NYSE Rule 80B visual indicator and workload reallocation (`frontend/src/components/CircuitBreaker.tsx`).
     - **Office Hours Negotiator Modal**: Syllabus-grounded email petition and 60-second talking points generator (`frontend/src/components/NegotiationModal.tsx`).
     - **Morning Bell Dispatch**: Web Audio tubular bell chime + Web Speech API vocal academic briefing (`frontend/src/components/MorningBell.tsx`).
-  - Test suite: `330 passed` Vitest cases (`frontend/tests/`).
+    - **Academic Calendar Dispatch Modal**: RFC 5545 `.ics` downloader, live `webcal://` subscription feed URL, and single-click Google Calendar sync (`frontend/src/components/CalendarExportModal.tsx`).
+  - Test suite: `340 passed` Vitest cases (`frontend/tests/`).
 - **DevOps & Cloud Deployment**:
   - Render (`render.yaml`) for FastAPI backend.
   - Vercel (`vercel.json`) building `frontend/` as a static/edge service proxying `/api/v1/*` to backend.
@@ -60,6 +62,10 @@
    - Summarizes daily academic health, impending deadlines, and active circuit breakers with an interactive transcript modal.
 8. **Hackathon Judge Evaluation Skill**:
    - `scripts/judge.py`: 100-point rubric evaluator, hostile judge Q&A griller, and 180-second pitch runbook.
+9. **Academic Calendar Sync Engine (RFC 5545 .ICS Export & Live Webcal Subscription Feed)**:
+   - `GET /api/v1/portfolio/calendar.ics` & `POST /api/v1/portfolio/calendar.ics` (hotkey `C` or `[CAL // .ICS]` in TopBar).
+   - Generates compliant RFC 5545 iCalendar data with 24h/2h deadline alarms (`VALARM`), intelligent pre-deadline focus work study blocks, upcoming academic events, and copyable `webcal://` live subscription feed link.
+   - Deep-linked `+GCAL` and `+CAL OFFICE HOURS` actions directly within `TaskTree.tsx` and `NegotiationModal.tsx`.
 
 ---
 
