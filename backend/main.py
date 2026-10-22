@@ -21,6 +21,8 @@ from .models import (
     DecomposeRequest,
     DecomposeResponse,
     DefenseCouncilDeliberation,
+    EfficientFrontierRequest,
+    EfficientFrontierResponse,
     InferenceTelemetry,
     MarginCallReport,
     NegotiationPetition,
@@ -286,6 +288,26 @@ def create_app(
             media_type="text/calendar; charset=utf-8",
             headers={"Content-Disposition": 'attachment; filename="apex-academic-schedule.ics"'},
         )
+
+    @app.get("/api/v1/portfolio/efficient-frontier", response_model=EfficientFrontierResponse)
+    async def get_efficient_frontier(
+        request: Request,
+        weekly_hours: float = 20.0,
+        strategy: str = "balanced",
+    ) -> EfficientFrontierResponse:
+        strat = (
+            strategy
+            if strategy in ("magna_cum_laude", "balanced", "drawdown_defense")
+            else "balanced"
+        )
+        req = EfficientFrontierRequest(weekly_hours=weekly_hours, strategy=strat)  # type: ignore[arg-type]
+        return await request.app.state.terminal.efficient_frontier(req)
+
+    @app.post("/api/v1/portfolio/efficient-frontier", response_model=EfficientFrontierResponse)
+    async def post_efficient_frontier(
+        body: EfficientFrontierRequest, request: Request
+    ) -> EfficientFrontierResponse:
+        return await request.app.state.terminal.efficient_frontier(body)
 
     @app.post("/api/v1/triage/{assignment_id}/negotiate", response_model=NegotiationPetition)
     async def negotiate(

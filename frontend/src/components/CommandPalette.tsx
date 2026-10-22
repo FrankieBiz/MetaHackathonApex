@@ -5,6 +5,7 @@ import { useEscape, useRestoreFocus } from "@/components/ui";
 import { useSyllabusIngest } from "@/components/SyllabusIngestModal";
 import { useMonteCarlo } from "@/components/MonteCarloModal";
 import { useCalendarExport } from "@/components/CalendarExportModal";
+import { useEfficientFrontier } from "@/components/EfficientFrontierModal";
 import { useMarginCall } from "@/components/MarginCallModal";
 import { openMorningBell } from "@/components/MorningBell";
 import { useNegotiator } from "@/components/NegotiationModal";
@@ -190,6 +191,13 @@ function PaletteDialog({
       hint: "Download RFC 5545 .ics schedule or copy live webcal:// feed URL",
       shortcut: "C",
       run: () => useCalendarExport.getState().setOpen(true),
+    });
+    actions.push({
+      id: "efficient-frontier",
+      label: "EFFICIENT FRONTIER: PARETO STUDY ALLOCATOR",
+      hint: "Markowitz portfolio optimizer for weekly study hours and GPA yield",
+      shortcut: "E",
+      run: () => useEfficientFrontier.getState().setOpen(true),
     });
     actions.push({
       id: "margin-call",

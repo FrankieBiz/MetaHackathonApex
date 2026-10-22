@@ -411,6 +411,7 @@ async def test_cors_and_openapi(api, terminal):
         "/api/v1/portfolio/calendar.ics",
         "/api/v1/portfolio/calendar/export",
         "/api/portfolio/calendar.ics",
+        "/api/v1/portfolio/efficient-frontier",
         "/api/v1/triage/{assignment_id}/negotiate",
         "/api/subtasks/{subtask_id}",
     }

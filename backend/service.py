@@ -31,6 +31,7 @@ from .ai_engine import (
 from .calendar_export import generate_ics_calendar
 from .canvas_client import CanvasClient, CanvasSnapshot
 from .config import Settings
+from .efficient_frontier import calculate_efficient_frontier
 from .models import (
     AgentReasoningStep,
     AssignmentModel,
@@ -39,6 +40,8 @@ from .models import (
     CourseModel,
     DecomposeResponse,
     DefenseCouncilDeliberation,
+    EfficientFrontierRequest,
+    EfficientFrontierResponse,
     Identifier,
     InferenceTelemetry,
     MarginCallCourse,
@@ -794,6 +797,12 @@ class TerminalService:
             include_completed=include_completed,
             course_id=course_id,
         )
+
+    async def efficient_frontier(
+        self, request: EfficientFrontierRequest
+    ) -> EfficientFrontierResponse:
+        state = await self.state()
+        return calculate_efficient_frontier(state, request)
 
     async def _sync(self, *, force: bool = False) -> None:
         snapshot = await self.canvas.sync(force=force)

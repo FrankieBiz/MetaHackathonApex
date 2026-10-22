@@ -15,6 +15,7 @@ import { TaskTree } from "@/components/TaskTree";
 import { TokenModal } from "@/components/TokenModal";
 import { TopBar } from "@/components/TopBar";
 import { useCalendarExport } from "@/components/CalendarExportModal";
+import { useEfficientFrontier } from "@/components/EfficientFrontierModal";
 import { useMarginCall } from "@/components/MarginCallModal";
 import { openMorningBell } from "@/components/MorningBell";
 import { useNegotiator } from "@/components/NegotiationModal";
@@ -167,6 +168,15 @@ function useHotkeys() {
         if (state.data) {
           event.preventDefault();
           useCalendarExport.getState().setOpen(true);
+        }
+        return;
+      }
+
+      // Academic efficient frontier & study allocator (E)
+      if (key === "e" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        if (state.data) {
+          event.preventDefault();
+          useEfficientFrontier.getState().setOpen(true);
         }
         return;
       }

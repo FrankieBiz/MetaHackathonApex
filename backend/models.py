@@ -470,3 +470,45 @@ class CalendarExportRequest(StrictModel):
     include_alarms: bool = True
     include_completed: bool = False
     course_id: Identifier | None = None
+
+
+class FrontierCourseAllocation(StrictModel):
+    course_id: Identifier
+    course_code: Title
+    course_name: Title
+    current_score: float
+    target_score: float
+    credit_hours: float = 3.0
+    allocated_minutes: int
+    allocated_hours: float
+    projected_score: float
+    score_delta: float
+    marginal_gpa_yield: float
+    efficiency_rank: int
+    status: Literal["healthy", "drawdown", "critical"]
+
+
+class FrontierPoint(StrictModel):
+    total_hours: float
+    portfolio_gpa: float
+    portfolio_score: float
+    portfolio_volatility: float
+    sharpe_ratio: float
+    course_allocations: list[FrontierCourseAllocation]
+
+
+class EfficientFrontierRequest(StrictModel):
+    weekly_hours: Annotated[float, Field(ge=1.0, le=80.0)] = 20.0
+    strategy: Literal["magna_cum_laude", "balanced", "drawdown_defense"] = "balanced"
+
+
+class EfficientFrontierResponse(StrictModel):
+    weekly_hours: float
+    strategy: Literal["magna_cum_laude", "balanced", "drawdown_defense"]
+    current_portfolio_gpa: float
+    projected_portfolio_gpa: float
+    gpa_delta: float
+    portfolio_volatility: float
+    sharpe_ratio: float
+    frontier_curve: list[FrontierPoint]
+    optimal_allocation: list[FrontierCourseAllocation]

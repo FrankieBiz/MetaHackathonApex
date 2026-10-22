@@ -27,6 +27,10 @@ import {
   useCalendarExport,
 } from "@/components/CalendarExportModal";
 import {
+  EfficientFrontierModal,
+  useEfficientFrontier,
+} from "@/components/EfficientFrontierModal";
+import {
   PortfolioReportModal,
   useDossier,
 } from "@/components/PortfolioReportModal";
@@ -545,6 +549,13 @@ export function TopBar() {
             CAL // .ICS
           </Key>
           <Key
+            onClick={() => useEfficientFrontier.getState().setOpen(true)}
+            title="Academic Efficient Frontier & Pareto study hour allocator (hotkey E)"
+            aria-label="Open academic efficient frontier"
+          >
+            FRONTIER
+          </Key>
+          <Key
             tone={breaches ? "down" : "default"}
             onClick={() => setMarginCallOpen(true)}
             title={`Margin call desk: breached courses, restoration order, and a WhatsApp alert preview (hotkey M)${
@@ -580,6 +591,7 @@ export function TopBar() {
       <NegotiationModal />
       <MorningBellModal />
       <CalendarExportModal />
+      <EfficientFrontierModal />
     </header>
   );
 }
