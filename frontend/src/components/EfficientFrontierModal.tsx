@@ -45,6 +45,7 @@ const STRATEGY_LABELS: Record<FrontierStrategy, { title: string; desc: string }>
 function EfficientFrontierDialog({ onClose }: { onClose: () => void }) {
   const data = useTerminal((s) => s.data);
   const remote = useTerminal((s) => isRemote(s.mode));
+  const studentMode = useTerminal((s) => s.studentMode);
   const [weeklyHours, setWeeklyHours] = useState(20);
   const [strategy, setStrategy] = useState<FrontierStrategy>("balanced");
   const [applied, setApplied] = useState(false);
@@ -101,7 +102,9 @@ function EfficientFrontierDialog({ onClose }: { onClose: () => void }) {
               id="frontier-title"
               className="text-[13px] font-bold tracking-wider text-ink uppercase"
             >
-              Academic Efficient Frontier & Study Allocator
+              {studentMode
+                ? "Optimal Study Schedule · Markowitz GPA Allocator"
+                : "Academic Efficient Frontier & Study Allocator"}
             </h2>
           </div>
           <Key onClick={onClose} aria-label="Close efficient frontier desk">
@@ -131,11 +134,15 @@ function EfficientFrontierDialog({ onClose }: { onClose: () => void }) {
             </div>
 
             <div className="flex flex-col border border-line-strong bg-panel/60 p-2">
-              <span className="text-[10px] text-ink-3 uppercase">Academic Sharpe</span>
+              <span className="text-[10px] text-ink-3 uppercase">
+                {studentMode ? "Study ROI (Sharpe)" : "Academic Sharpe"}
+              </span>
               <span className="text-[18px] font-bold text-accent tabular-nums">
                 {frontier.sharpe_ratio.toFixed(2)}
               </span>
-              <span className="text-[9px] text-ink-3">Yield / Volatility</span>
+              <span className="text-[9px] text-ink-3">
+                {studentMode ? "GPA Yield per Hour" : "Yield / Volatility"}
+              </span>
             </div>
 
             <div className="flex flex-col border border-line-strong bg-panel/60 p-2">

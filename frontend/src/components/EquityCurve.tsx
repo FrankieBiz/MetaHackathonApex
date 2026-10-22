@@ -273,6 +273,7 @@ export function EquityCurve() {
   const [view, setView] = useState<"graph" | "table">("graph");
   const scenario = useTerminal((s) => s.scenario);
   const setScenarioScore = useTerminal((s) => s.setScenarioScore);
+  const studentMode = useTerminal((s) => s.studentMode);
   // A tile can focus another course until the execution deck's selection changes.
   const [picked, setPicked] = useState<string | null>(null);
   const selection = selectedId ?? selectedCourse;
@@ -345,7 +346,11 @@ export function EquityCurve() {
 
   return (
     <Panel
-      title="EQUITY CURVE // GRADE TRAJECTORY & MARGIN"
+      title={
+        studentMode
+          ? "GPA TRAJECTORY // SEMESTER STANDING & 90% EXAM RISK"
+          : "EQUITY CURVE // GRADE TRAJECTORY & MARGIN"
+      }
       footer={
         focus && (
           <WhatIfBar

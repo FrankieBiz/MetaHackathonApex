@@ -1,9 +1,9 @@
 # Apex OS — Master Agent Handoff Document
 
-> **Last Updated**: 2026-10-22T17:35:00-04:00  
+> **Last Updated**: 2026-10-22T18:15:00-04:00  
 > **Repository**: `APEX/crayfish`  
 > **Production Branch**: `main` (synced to `origin` and `metahackathon`)  
-> **Verification Status**: 100% Green (`make check` — 759 automated tests passing, 0 failures; Meta Hackathon Judge Scorecard: 100/100 Grade A)
+> **Verification Status**: 100% Green (`make check` — 766 automated tests passing, 0 failures; Meta Hackathon Judge Scorecard: 100/100 Grade A)
 
 ---
 
@@ -72,6 +72,11 @@
    - `GET /api/v1/portfolio/efficient-frontier` & `POST /api/v1/portfolio/efficient-frontier` (hotkey `E` or `[FRONTIER]` in TopBar).
    - Solves the Markowitz-analog study allocation problem using convex diminishing marginal returns: maximizes credit-weighted GPA under finite weekly time budgets (5h to 40h).
    - Provides three optimization strategies (Magna Cum Laude, Balanced, Drawdown Defense), computes marginal GPA yield ($dGPA/dHr$), Academic Sharpe Ratio, and renders interactive SVG frontier curves.
+11. **Collegiate Subtitles, "Student Mode" & Interactive 60s Judge Demo Tour HUD**:
+   - `frontend/src/lib/studentMode.ts` & `frontend/src/store/tourStore.ts` (hotkey `U` or `[🎓 STUDENT | WALL ST]` in TopBar).
+   - Solves the cognitive overload issue for judges without sacrificing the high-density Bloomberg aesthetic: adds plain-English collegiate subtitles across Order Book, Equity Curve, Task Tree, Next Best Action, Margin Call, and Efficient Frontier.
+   - Floating `[▶ 60s DEMO TOUR]` HUD (`JudgeTourHUD.tsx`) steps judges through 5 sequential acts (The Crisis, Meta Llama Triage, Atomic Task Fill, 1,000-Path Monte Carlo, and Markowitz Pareto Allocation) with prev/next controls and pulsing panel highlights.
+   - Multimodal syllabus vision ingest image preview (`SyllabusIngestModal.tsx`) with thumbnail rendering and `[👁️ META LLAMA 3.2 VISION TARGET]` indicator.
 
 ---
 

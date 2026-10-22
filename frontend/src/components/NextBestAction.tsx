@@ -69,6 +69,7 @@ function floorFigure(floor: number | null): { text: string; tone: string } {
 export function NextBestAction() {
   const data = useTerminal((s) => s.data);
   const triaging = useTerminal((s) => s.triaging);
+  const studentMode = useTerminal((s) => s.studentMode);
   const minute = useNow(60_000);
 
   const view = useMemo(() => {
@@ -121,7 +122,9 @@ export function NextBestAction() {
     >
       <div className="flex min-w-0 flex-[1_1_18rem] flex-col gap-1">
         <span className="text-[10px] tracking-wider text-accent">
-          ▶ NEXT BEST ACTION · TONIGHT
+          {studentMode
+            ? "▶ TOP PRIORITY ACTION · HIGHEST GPA IMPACT"
+            : "▶ NEXT BEST ACTION · TONIGHT"}
         </span>
         <span
           key={leaf?.id ?? assignment.id}
@@ -140,7 +143,7 @@ export function NextBestAction() {
 
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
         <Figure
-          label="Margin protected"
+          label={studentMode ? "GPA impact" : "Margin protected"}
           help={GLOSSARY.marginProtected}
           tone="text-up"
         >
@@ -157,14 +160,14 @@ export function NextBestAction() {
           {action.duration === null ? "TRIAGE" : minutes(action.duration)}
         </Figure>
         <Figure
-          label="Grade floor"
+          label={studentMode ? "Min pass score" : "Grade floor"}
           help={`${GLOSSARY.gradeFloor}\n\n${floorText(action.floor, course)}.`}
           tone={floor.tone}
         >
           {floor.text}
         </Figure>
         <Figure
-          label="Margin of safety"
+          label={studentMode ? "Score buffer" : "Margin of safety"}
           help={GLOSSARY.marginOfSafety}
           tone={safety === null ? "text-ink-3" : safety >= 0 ? "text-up" : "text-down"}
           className="hidden sm:flex"
@@ -172,7 +175,7 @@ export function NextBestAction() {
           {safety === null ? "—" : signed(safety)}
         </Figure>
         <Figure
-          label="VaR 90%"
+          label={studentMode ? "Worst exam risk" : "VaR 90%"}
           help={GLOSSARY.var}
           tone={valueAtRisk === null ? "text-ink-3" : "text-accent"}
           className="hidden md:flex"
