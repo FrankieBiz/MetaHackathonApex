@@ -20,7 +20,15 @@ import {
 } from "recharts";
 import { create } from "zustand";
 import { Key, Spinner, useEscape, useRestoreFocus } from "@/components/ui";
+import { useNow } from "@/hooks/useNow";
 import { api, type MonteCarloRun } from "@/lib/api";
+import {
+  clusterWindow,
+  congestionTier,
+  courseClusters,
+  detectCongestion,
+  type CongestionCluster,
+} from "@/lib/congestion";
 import { simulatable } from "@/lib/engine";
 import { pct, signed } from "@/lib/format";
 import {
@@ -354,6 +362,59 @@ function ShockSlider({
   );
 }
 
+/** Deadline pile-ups this course shares with others, and what they do to the spread. */
+function CongestionBanner({
+  clusters,
+  course,
+  courses,
+  assignments,
+}: {
+  clusters: CongestionCluster[];
+  course: Course;
+  courses: Course[];
+  assignments: Assignment[];
+}) {
+  const [worst, ...rest] = courseClusters(clusters, course.id);
+  if (!worst) return null;
+  const critical = congestionTier(worst.congestion_score) === "critical";
+  const codes = worst.course_ids
+    .map((id) => courses.find((c) => c.id === id)?.course_code ?? id)
+    .join(" · ");
+  const titles = worst.assignment_ids
+    .map((id) => assignments.find((a) => a.id === id))
+    .filter((a): a is Assignment => Boolean(a))
+    .map((a) => `${a.course_code} ${a.title}`);
+  return (
+    <div
+      role="note"
+      aria-label="Deadline congestion"
+      title={titles.join("\n")}
+      className={`flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-b px-3 py-1.5 text-[11px] ${
+        critical
+          ? "border-down/50 bg-down/10 text-down"
+          : "border-accent/40 bg-accent/10 text-accent"
+      }`}
+    >
+      <span className="shrink-0 tracking-wider uppercase">
+        ⚠ Deadline congestion
+      </span>
+      <span className="text-ink">
+        {worst.assignment_ids.length} deliverables across {codes} due{" "}
+        {clusterWindow(worst)}
+      </span>
+      <span className="tabular-nums">
+        VAR ×{worst.variance_inflation.toFixed(2)} · σ ×
+        {Math.sqrt(worst.variance_inflation).toFixed(2)} on clustered work
+      </span>
+      {rest.length > 0 && (
+        <span className="text-ink-3">
+          +{rest.length} more window{rest.length === 1 ? "" : "s"}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function MonteCarloDialog({ onClose }: { onClose: () => void }) {
   useRestoreFocus();
   useEscape(onClose);
@@ -394,6 +455,13 @@ function MonteCarloDialog({ onClose }: { onClose: () => void }) {
   }, [body, data, offline]);
 
   const pending = run?.key !== key;
+  // The run's own matrix when the backend sent one; else the local detector.
+  const sent = run?.run.response.congestion_matrix;
+  const now = useNow(60_000);
+  const clusters = useMemo(
+    () => sent ?? (data ? detectCongestion(data.assignments, now) : []),
+    [sent, data, now],
+  );
   const simulation =
     run?.run.response.courses.find((c) => c.course_id === course?.id) ?? null;
   const open = course && data ? simulatable(course.id, data.assignments) : [];
@@ -470,6 +538,13 @@ function MonteCarloDialog({ onClose }: { onClose: () => void }) {
                 )}
               </span>
             </div>
+
+            <CongestionBanner
+              clusters={clusters}
+              course={course}
+              courses={data.courses}
+              assignments={data.assignments}
+            />
 
             {!simulation ? (
               <p className="flex items-center justify-center gap-2 px-3 py-10 text-[11px] text-accent">

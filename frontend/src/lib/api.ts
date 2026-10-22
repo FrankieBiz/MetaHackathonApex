@@ -2,6 +2,16 @@
 // back to its schema default instead of taking the whole terminal down.
 
 import { z } from "zod";
+import {
+  COUNCIL_ROLES,
+  localDefenseCouncil,
+  type DefenseCouncilDeliberation,
+  type DefenseCouncilMember,
+} from "@/lib/defenseCouncil";
+import {
+  generateLocalMarginCall,
+  type MarginCallReport,
+} from "@/lib/marginCall";
 import { createMockState } from "@/lib/mockData";
 import {
   ACADEMIC_STANCES,
@@ -345,6 +355,12 @@ const TraceStep = z.object({
   latency_ms: z.number().finite().nonnegative().catch(0),
 });
 
+const CouncilMember = z.object({
+  role: z.enum(COUNCIL_ROLES),
+  position: z.string().trim().min(1),
+  priorities: z.array(z.string()).catch([]),
+});
+
 export interface TriageResult {
   subtasks: SubTaskNode[];
   source: "ai" | "local" | "cached";
@@ -389,7 +405,8 @@ export type TriageStreamEvent =
   | { type: "log"; message: string }
   | { type: "tool_call"; name: string; arguments: unknown; result: unknown }
   | { type: "token"; text: string }
-  | { type: "step"; step: AgentReasoningStep };
+  | { type: "step"; step: AgentReasoningStep }
+  | { type: "council_turn"; member: DefenseCouncilMember };
 
 /** The backend answered the stream with an in-band `error` event: the agent itself failed. */
 export class TriageStreamError extends ApiError {
@@ -532,6 +549,12 @@ export async function streamTriage(
               typeof body.step === "object" ? body.step : payload,
             );
             if (step.success) onEvent({ type: "step", step: step.data });
+            break;
+          }
+          case "council_turn": {
+            const member = CouncilMember.safeParse(payload);
+            if (member.success)
+              onEvent({ type: "council_turn", member: member.data });
             break;
           }
           case "done":
@@ -682,6 +705,21 @@ const MonteCarloBody = z.object({
       ),
     }),
   ),
+  // Older backends send none; a malformed matrix drops rather than failing the run.
+  congestion_matrix: z
+    .array(
+      z.object({
+        id,
+        start_at: z.string(),
+        end_at: z.string(),
+        course_ids: z.array(id),
+        assignment_ids: z.array(id),
+        congestion_score: finite.min(0).max(1),
+        variance_inflation: finite.min(1).max(2),
+      }),
+    )
+    .optional()
+    .catch(undefined),
 });
 
 /**
@@ -844,6 +882,166 @@ export async function portfolioReport(
   }
 }
 
+// ------------------------------------------------------- defense council
+
+/** One bounded model pass on the backend (45s); past this the local council sits. */
+const COUNCIL_DEADLINE_MS = 60_000;
+
+const CouncilBody = z.object({
+  assignment_id: id,
+  members: z
+    .array(CouncilMember)
+    .length(3)
+    .refine(
+      (members) => members.every((m, i) => m.role === COUNCIL_ROLES[i]),
+      { message: "Council seats out of order" },
+    ),
+  verdict: z.string().trim().min(1),
+  source: z.enum(["ai", "local"]),
+  telemetry: Telemetry.extend({ latency_ms: finite.nonnegative() }),
+});
+
+/**
+ * A council session. An offline desk, or a slow, failing, or malformed backend
+ * answer, convenes the local council over `state` instead, flagged `local`
+ * with the cause attached. Rejects only for an id missing from `state`.
+ */
+export type CouncilRun =
+  | { source: "backend"; deliberation: DefenseCouncilDeliberation }
+  | {
+      source: "local";
+      deliberation: DefenseCouncilDeliberation;
+      cause: ApiError;
+    };
+
+export async function defenseCouncil(
+  assignmentId: string,
+  state: Pick<TerminalState, "courses" | "assignments">,
+  { offline = false }: { offline?: boolean } = {},
+): Promise<CouncilRun> {
+  const local = (cause: ApiError): CouncilRun => {
+    const assignment = state.assignments.find((a) => a.id === assignmentId);
+    if (!assignment) throw new ApiError("No such deliverable", "parse");
+    return {
+      source: "local",
+      deliberation: localDefenseCouncil(assignment, state),
+      cause,
+    };
+  };
+  // The pinned or detached desk never contacts the backend.
+  if (offline) {
+    return local(new ApiError("Simulation desk is offline", "network"));
+  }
+  const path = `/api/v1/triage/${encodeURIComponent(assignmentId)}/council`;
+  try {
+    const raw = await request(path, { method: "POST" }, COUNCIL_DEADLINE_MS);
+    const body = CouncilBody.parse(raw);
+    if (body.assignment_id !== assignmentId) {
+      throw new ApiError("Council ruled on a different deliverable", "parse");
+    }
+    return {
+      source: "backend",
+      deliberation: {
+        ...body,
+        telemetry: {
+          ...body.telemetry,
+          latency_ms: Math.round(body.telemetry.latency_ms),
+        },
+        subtasks: buildTree(
+          (raw as { subtasks?: unknown }).subtasks,
+          assignmentId,
+        ),
+      },
+    };
+  } catch (error) {
+    return local(
+      error instanceof ApiError
+        ? error
+        : new ApiError(`${path} sent a malformed deliberation`, "parse"),
+    );
+  }
+}
+
+// ----------------------------------------------------------- margin call
+
+const MARGIN_CALL_DEADLINE_MS = 15_000;
+
+const MarginCallBody = z.object({
+  triggered: z.boolean(),
+  academic_stance: z.enum(ACADEMIC_STANCES),
+  liquidation_deficit: finite.min(0),
+  breached_courses: z.array(
+    z.object({
+      course_id: id,
+      course_code: z.string().catch("COURSE"),
+      current_score: finite,
+      target_score: finite,
+      deficit: finite.min(0),
+    }),
+  ),
+  restoration_order: z.array(
+    z.object({
+      assignment_id: id,
+      course_id: id,
+      title: z.string().catch("Untitled deliverable"),
+      due_at: z.string().nullable().catch(null),
+      marginal_impact: finite.min(0).max(1),
+      required_score: finite.min(0).nullable().catch(null),
+    }),
+  ),
+  webhook_payload: z
+    .object({
+      messaging_product: z.literal("whatsapp"),
+      type: z.literal("text"),
+      text: z.object({ body: z.string() }),
+    })
+    .nullable()
+    .catch(null),
+});
+
+/**
+ * A margin call check. Like a feed read it never rejects: an offline desk, or
+ * a slow, failing, or malformed backend answer, is computed locally from
+ * `state` instead, flagged `local` with the cause attached.
+ */
+export type MarginCallRun =
+  | { source: "backend"; report: MarginCallReport }
+  | { source: "local"; report: MarginCallReport; cause: ApiError };
+
+export async function marginCall(
+  state: Pick<TerminalState, "courses" | "assignments">,
+  { offline = false }: { offline?: boolean } = {},
+): Promise<MarginCallRun> {
+  const local = (cause: ApiError): MarginCallRun => ({
+    source: "local",
+    report: generateLocalMarginCall(state),
+    cause,
+  });
+  // The pinned or detached desk never contacts the backend.
+  if (offline) {
+    return local(new ApiError("Simulation desk is offline", "network"));
+  }
+  try {
+    const report = MarginCallBody.parse(
+      await request(
+        "/api/v1/portfolio/margin-call",
+        { method: "POST" },
+        MARGIN_CALL_DEADLINE_MS,
+      ),
+    );
+    return { source: "backend", report };
+  } catch (error) {
+    return local(
+      error instanceof ApiError
+        ? error
+        : new ApiError(
+            "/api/v1/portfolio/margin-call sent a malformed report",
+            "parse",
+          ),
+    );
+  }
+}
+
 export const api = {
   state: () => intercept(readState),
 
@@ -955,6 +1153,8 @@ export const api = {
 
   simulateMonteCarlo,
   portfolioReport,
+  defenseCouncil,
+  marginCall,
 
   patchSubtask: (
     subtaskId: string,

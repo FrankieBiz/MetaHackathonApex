@@ -240,6 +240,7 @@ describe("applyTraceEvent", () => {
       steps: [],
       events: [],
       tokens: "",
+      council: [],
       source: null,
       telemetry: null,
     } as Parameters<typeof applyTraceEvent>[0];

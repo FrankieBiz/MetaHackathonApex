@@ -3,6 +3,7 @@
 // backend/service.py `_portfolio_report` (same Monte Carlo model, statuses,
 // stance ladder, and action ranking), so a detached desk files the same book.
 
+import { detectCongestion, varianceInflation } from "@/lib/congestion";
 import { simulateCourse } from "@/lib/monteCarlo";
 import { pct, signed } from "@/lib/format";
 import type { TerminalState } from "@/types";
@@ -245,11 +246,19 @@ export function generateLocalReport(
   const actions: LeverageAction[] = [];
   const samples: number[][] = [];
   const projected: number[] = [];
+  const inflation = varianceInflation(detectCongestion(state.assignments, now));
 
   for (const course of state.courses) {
     const own = state.assignments.filter((a) => a.course_id === course.id);
     const paths: number[] = [];
-    const forecast = simulateCourse(course, own, REPORT_ITERATIONS, {}, paths);
+    const forecast = simulateCourse(
+      course,
+      own,
+      REPORT_ITERATIONS,
+      {},
+      paths,
+      inflation,
+    );
     if (paths.length && forecast.percentiles) {
       samples.push(paths);
       projected.push(gradePoints(forecast.percentiles.p50));

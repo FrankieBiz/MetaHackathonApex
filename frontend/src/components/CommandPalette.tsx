@@ -4,7 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useEscape, useRestoreFocus } from "@/components/ui";
 import { useSyllabusIngest } from "@/components/SyllabusIngestModal";
 import { useMonteCarlo } from "@/components/MonteCarloModal";
+import { useMarginCall } from "@/components/MarginCallModal";
 import { useDossier } from "@/components/PortfolioReportModal";
+import { useCouncil } from "@/store/council";
 import { rankQueue } from "@/lib/engine";
 import { startTour } from "@/lib/tour";
 import { exportPortfolio } from "@/lib/portfolioExport";
@@ -88,7 +90,7 @@ function PaletteDialog({
         id: "sound",
         label: store.soundOn ? "MUTE TERMINAL AUDIO" : "ENABLE TERMINAL AUDIO",
         hint: "Synthesized startup chime, clicks, fills & warnings",
-        shortcut: "M",
+        shortcut: "SHIFT+M",
         run: () => store.toggleSound(),
       },
       {
@@ -179,6 +181,26 @@ function PaletteDialog({
       shortcut: "R",
       run: () => useDossier.getState().setOpen(true),
     });
+    actions.push({
+      id: "margin-call",
+      label: "MARGIN CALL: BREACHES & WHATSAPP ALERT",
+      hint: "Liquidation deficit, restoration order, alert preview",
+      shortcut: "M",
+      run: () => useMarginCall.getState().setOpen(true),
+    });
+    if (selected) {
+      actions.push({
+        id: "defense-council",
+        label: `DEFENSE COUNCIL · ${selected.course_code}`,
+        hint: `Professor, Student & Arbitrator on ${selected.title}`,
+        shortcut: "COUNCIL",
+        run: () => {
+          const council = useCouncil.getState();
+          council.setTab("council");
+          void council.convene(selected.id);
+        },
+      });
+    }
     actions.push({
       id: "reset-scenario",
       label: "WHAT-IF: RESET SIMULATION SCORES",

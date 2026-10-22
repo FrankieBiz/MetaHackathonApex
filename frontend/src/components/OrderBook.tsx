@@ -27,6 +27,14 @@ import {
   type PriorityTier,
   type QueueEntry,
 } from "@/lib/engine";
+import {
+  clusterIndex,
+  clusterWindow,
+  congestionTier,
+  detectCongestion,
+  type CongestionCluster,
+  type CongestionTier,
+} from "@/lib/congestion";
 import { countdown, score as fmtScore } from "@/lib/format";
 import { activeCourseOf, isRemote, useTerminal } from "@/store/terminal";
 import { studyOpportunity } from "@/lib/study";
@@ -40,6 +48,34 @@ const TIER_COLOR: Record<PriorityTier, string> = {
 };
 
 const NO_ASSIGNMENTS: Assignment[] = [];
+
+const CLUSTER_TONE: Record<CongestionTier, string> = {
+  watch: "border-line-strong text-ink-2",
+  elevated: "border-accent/60 text-accent",
+  critical: "border-down/60 bg-down/10 text-down",
+};
+
+/** Flags a deliverable caught in a cross-course deadline pile-up. */
+function ClusterBadge({
+  cluster,
+  codes,
+}: {
+  cluster: CongestionCluster;
+  codes: Map<string, string>;
+}) {
+  const tier = congestionTier(cluster.congestion_score);
+  const courses = cluster.course_ids.map((id) => codes.get(id) ?? id).join(", ");
+  const detail = `Deadline congestion (${tier}): ${cluster.assignment_ids.length} deliverables across ${courses} due ${clusterWindow(cluster)}. Simulated spread ×${Math.sqrt(cluster.variance_inflation).toFixed(2)}.`;
+  return (
+    <span
+      title={detail}
+      className={`shrink-0 border px-1 text-[9px] leading-[14px] tracking-wider ${CLUSTER_TONE[tier]}`}
+    >
+      <span aria-hidden>[</span>CLUSTER<span aria-hidden>]</span>
+      <span className="sr-only">. {detail}</span>
+    </span>
+  );
+}
 
 function dueTone(hours: number | null, completed: boolean) {
   if (completed) return "text-ink-3";
@@ -470,6 +506,18 @@ export function OrderBook() {
     return [...queue, ...filled];
   }, [scope, queue, assignments, now]);
 
+  // Minute resolution is plenty for a 72-hour window.
+  const minute = Math.floor(now / 60_000);
+  const clusters = useMemo(
+    () => detectCongestion(assignments, minute * 60_000),
+    [assignments, minute],
+  );
+  const clustered = useMemo(() => clusterIndex(clusters), [clusters]);
+  const codes = useMemo(
+    () => new Map((courses ?? []).map((c) => [c.id, c.course_code])),
+    [courses],
+  );
+
   const max = queue[0]?.priority ?? 0;
   const overdue = queue.filter((e) => e.hours !== null && e.hours < 0).length;
   const dueSoon = queue.filter(
@@ -611,11 +659,19 @@ export function OrderBook() {
                       </span>
                     </td>
                     <td className="w-full max-w-0 px-2 py-1">
-                      <span
-                        className="block truncate text-ink-2"
-                        title={assignment.title}
-                      >
-                        {assignment.title}
+                      <span className="flex items-center gap-1.5">
+                        <span
+                          className="min-w-0 truncate text-ink-2"
+                          title={assignment.title}
+                        >
+                          {assignment.title}
+                        </span>
+                        {!completed && clustered.has(assignment.id) && (
+                          <ClusterBadge
+                            cluster={clustered.get(assignment.id)!}
+                            codes={codes}
+                          />
+                        )}
                       </span>
                     </td>
                     <td
@@ -673,6 +729,12 @@ export function OrderBook() {
           </span>
           <span>
             Untriaged <span className="text-ink">{untriaged}</span>
+          </span>
+          <span title="Open deliverables inside a cross-course 72h deadline cluster">
+            Clustered{" "}
+            <span className={clustered.size ? "text-accent" : "text-ink"}>
+              {clustered.size}
+            </span>
           </span>
           <span className="ml-auto hidden @lg:inline">
             Priority = wt × pts / max(hrs, 1)

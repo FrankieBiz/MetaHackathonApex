@@ -13,6 +13,7 @@ import {
   SyllabusIngestModal,
   useSyllabusIngest,
 } from "@/components/SyllabusIngestModal";
+import { MarginCallModal, useMarginCall } from "@/components/MarginCallModal";
 import { MonteCarloModal, useMonteCarlo } from "@/components/MonteCarloModal";
 import {
   PortfolioReportModal,
@@ -32,6 +33,7 @@ import {
 } from "@/lib/engine";
 import { clock, pct, signed } from "@/lib/format";
 import { GLOSSARY } from "@/lib/glossary";
+import { breachCount } from "@/lib/marginCall";
 import { isRemote, useTerminal } from "@/store/terminal";
 import { startTour } from "@/lib/tour";
 import { armStartupChime, playAlert } from "@/lib/feedback";
@@ -433,6 +435,8 @@ export function TopBar() {
   const setSyllabusOpen = useSyllabusIngest((s) => s.setOpen);
   const setMonteCarloOpen = useMonteCarlo((s) => s.setOpen);
   const setDossierOpen = useDossier((s) => s.setOpen);
+  const setMarginCallOpen = useMarginCall((s) => s.setOpen);
+  const breaches = useTerminal((s) => (s.data ? breachCount(s.data) : 0));
   const modifier = useModifierLabel();
 
   return (
@@ -459,7 +463,7 @@ export function TopBar() {
           </Key>
           <Key
             onClick={() => toggleSound()}
-            title={`Toggle terminal audio effects (${soundOn ? "ON" : "OFF"}, hotkey M)`}
+            title={`Toggle terminal audio effects (${soundOn ? "ON" : "OFF"}, hotkey Shift+M)`}
             aria-label="Toggle audio effects"
           >
             SND {soundOn ? "ON" : "OFF"}
@@ -503,6 +507,19 @@ export function TopBar() {
             DOSSIER // MEMO
           </Key>
           <Key
+            tone={breaches ? "down" : "default"}
+            onClick={() => setMarginCallOpen(true)}
+            title={`Margin call desk: breached courses, restoration order, and a WhatsApp alert preview (hotkey M)${
+              breaches
+                ? ` · ${breaches} course${breaches === 1 ? "" : "s"} under target`
+                : ""
+            }`}
+            aria-label={`Open the margin call desk${breaches ? `, ${breaches} courses under target` : ""}`}
+          >
+            MARGIN CALL
+            {breaches > 0 && <span className="ml-1">● {breaches}</span>}
+          </Key>
+          <Key
             onClick={() => setTokenOpen(true)}
             aria-label="Configure Canvas API token"
           >
@@ -521,6 +538,7 @@ export function TopBar() {
       <SyllabusIngestModal />
       <MonteCarloModal />
       <PortfolioReportModal />
+      <MarginCallModal />
     </header>
   );
 }

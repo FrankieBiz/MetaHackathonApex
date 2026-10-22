@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useState } from "react";
+import { DefenseCouncil } from "@/components/DefenseCouncil";
 import { Key, Meter, Panel, Spinner, TRACE_STATUS } from "@/components/ui";
 import { useNow } from "@/hooks/useNow";
 import { countdown, minutes, score } from "@/lib/format";
@@ -12,6 +13,7 @@ import {
   type AgentTrace,
 } from "@/store/terminal";
 import { studyOpportunity, studyTitleKey } from "@/lib/study";
+import { useCouncil, type DeckTab } from "@/store/council";
 import type {
   AgentReasoningStep,
   Assignment,
@@ -528,6 +530,11 @@ export function TaskTree() {
   const [traceOpen, setTraceOpen] = useState(true);
   const remote = useTerminal((s) => isRemote(s.mode));
   const triage = useTerminal((s) => s.triage);
+  const tab = useCouncil((s) => s.tab);
+  const setTab = useCouncil((s) => s.setTab);
+  const councilSeats = useCouncil((s) =>
+    assignment ? (s.runs[assignment.id]?.deliberation.members.length ?? 0) : 0,
+  );
   const now = useNow(1000);
   const studyAction = course ? (
     <Key
@@ -641,73 +648,118 @@ export function TaskTree() {
           </div>
         )}
 
-        {(triaging || trace) && (
-          <AgentTraceLog
-            assignment={assignment}
-            remote={remote}
-            now={now}
-            startedAt={startedAt}
-            trace={trace}
-            open={traceOpen || triaging}
-            onToggle={() => setTraceOpen((v) => !v)}
-          />
-        )}
-
-        {triaging ? null : assignment.subtasks.length ? (
-          <ul
-            aria-label={`Work breakdown for ${assignment.title}`}
-            className="py-1 text-[12px]"
-          >
-            <li className="flex h-[24px] items-center gap-1.5 px-2.5 text-ink-2">
-              <span aria-hidden className="text-accent">
-                ■
-              </span>
-              {assignment.course_code} WORK BREAKDOWN
-            </li>
-            <TreeRows
-              nodes={assignment.subtasks}
-              assignmentId={assignment.id}
-              trail={[]}
-            />
-          </ul>
-        ) : (
-          <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-8 text-center">
-            <div className="text-[11px] tracking-wider text-ink-3 uppercase">
-              No work breakdown yet
-            </div>
-            <p className="max-w-[46ch] text-ink-2">
-              The triage agent audits the rubric and your capacity, then the
-              Meta model splits this assignment into 15–45 minute tasks you can
-              check off and time.
-            </p>
+        <div
+          role="tablist"
+          aria-label="Execution deck view"
+          className="flex shrink-0 gap-1 border-b border-line px-2.5 py-1"
+        >
+          {(
+            [
+              ["breakdown", "TRACE"],
+              ["council", "DEFENSE COUNCIL"],
+            ] as [DeckTab, string][]
+          ).map(([value, label]) => (
             <Key
-              tone="accent"
-              size="lg"
-              onClick={() => void triage(assignment.id)}
+              key={value}
+              role="tab"
+              id={`deck-tab-${value}`}
+              aria-selected={tab === value}
+              aria-controls="deck-body"
+              active={tab === value}
+              onClick={() => setTab(value)}
             >
-              ⚡ DECONSTRUCT WITH META LLAMA
+              {label}
+              {value === "council" && councilSeats > 0 && (
+                <span className="ml-1 text-up">●</span>
+              )}
             </Key>
-            {!remote && (
-              <p className="text-[11px] text-ink-3">
-                Backend offline: the local planner builds the tree instead.
-              </p>
+          ))}
+        </div>
+
+        {tab === "council" ? (
+          <div
+            id="deck-body"
+            role="tabpanel"
+            aria-labelledby="deck-tab-council"
+          >
+            <DefenseCouncil assignment={assignment} />
+          </div>
+        ) : (
+          <div
+            id="deck-body"
+            role="tabpanel"
+            aria-labelledby="deck-tab-breakdown"
+            className="flex flex-1 flex-col"
+          >
+            {(triaging || trace) && (
+              <AgentTraceLog
+                assignment={assignment}
+                remote={remote}
+                now={now}
+                startedAt={startedAt}
+                trace={trace}
+                open={traceOpen || triaging}
+                onToggle={() => setTraceOpen((v) => !v)}
+              />
+            )}
+
+            {triaging ? null : assignment.subtasks.length ? (
+              <ul
+                aria-label={`Work breakdown for ${assignment.title}`}
+                className="py-1 text-[12px]"
+              >
+                <li className="flex h-[24px] items-center gap-1.5 px-2.5 text-ink-2">
+                  <span aria-hidden className="text-accent">
+                    ■
+                  </span>
+                  {assignment.course_code} WORK BREAKDOWN
+                </li>
+                <TreeRows
+                  nodes={assignment.subtasks}
+                  assignmentId={assignment.id}
+                  trail={[]}
+                />
+              </ul>
+            ) : (
+              <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-8 text-center">
+                <div className="text-[11px] tracking-wider text-ink-3 uppercase">
+                  No work breakdown yet
+                </div>
+                <p className="max-w-[46ch] text-ink-2">
+                  The triage agent audits the rubric and your capacity, then the
+                  Meta model splits this assignment into 15–45 minute tasks you can
+                  check off and time.
+                </p>
+                <Key
+                  tone="accent"
+                  size="lg"
+                  onClick={() => void triage(assignment.id)}
+                >
+                  ⚡ DECONSTRUCT WITH META LLAMA
+                </Key>
+                {!remote && (
+                  <p className="text-[11px] text-ink-3">
+                    Backend offline: the local planner builds the tree instead.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {assignment.subtasks.length > 0 && !triaging && (
+              <footer className="sticky bottom-0 mt-auto flex flex-wrap gap-x-4 border-t border-line bg-panel px-2.5 py-1 text-[10px] tracking-wider text-ink-3 uppercase">
+                <span>
+                  <span className="text-up">[x]</span> done
+                </span>
+                <span>
+                  <span className="text-accent">[-]</span> partial
+                </span>
+                <span>[ ] open</span>
+                <span className="hidden @lg:inline">
+                  Checking a parent checks every task under it
+                </span>
+              </footer>
             )}
           </div>
-        )}
-
-        {assignment.subtasks.length > 0 && !triaging && (
-          <footer className="sticky bottom-0 mt-auto flex flex-wrap gap-x-4 border-t border-line bg-panel px-2.5 py-1 text-[10px] tracking-wider text-ink-3 uppercase">
-            <span>
-              <span className="text-up">[x]</span> done
-            </span>
-            <span>
-              <span className="text-accent">[-]</span> partial
-            </span>
-            <span>[ ] open</span>
-            <span className="hidden @lg:inline">
-              Checking a parent checks every task under it
-            </span>
-          </footer>
         )}
       </div>
     </Panel>

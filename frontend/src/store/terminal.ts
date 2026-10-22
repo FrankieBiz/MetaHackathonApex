@@ -46,6 +46,7 @@ import {
   triggerHaptic,
 } from "@/lib/feedback";
 import { minutes } from "@/lib/format";
+import type { DefenseCouncilMember } from "@/lib/defenseCouncil";
 import { createMockState } from "@/lib/mockData";
 import { reanchor } from "@/lib/sandbox";
 import { mergeSyllabusState } from "@/lib/syllabusPresets";
@@ -91,6 +92,8 @@ export interface AgentTrace {
   events: AgentEvent[];
   /** Model output as it streamed in; empty when nothing streamed. */
   tokens: string;
+  /** Defense Council seats the stream convened, in the order they spoke. */
+  council: DefenseCouncilMember[];
   /** null while the run is in flight · ai: the backend's model planned · local: a starter or offline plan · cached: a saved plan was kept. */
   source: "ai" | "local" | "cached" | null;
   /** Measured inference for the planning step; null when no model ran. */
@@ -123,6 +126,15 @@ export function applyTraceEvent(
         events: [
           ...trace.events,
           { kind: "log", text: event.message, from: "agent" },
+        ],
+      };
+    case "council_turn":
+      // One turn per seat; a re-sent seat replaces its earlier turn.
+      return {
+        ...trace,
+        council: [
+          ...trace.council.filter((m) => m.role !== event.member.role),
+          event.member,
         ],
       };
     case "tool_call":
@@ -851,6 +863,7 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
             steps: [],
             events: [],
             tokens: "",
+            council: [],
             source: null,
             telemetry: null,
           },
@@ -937,7 +950,7 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
           if (stale()) return;
           if (error instanceof TriageStreamError) return failed(error);
           // No stream (an older backend, a proxy, a dropped connection): ask for the whole plan.
-          live((trace) => ({ ...trace, steps: [], tokens: "" }));
+          live((trace) => ({ ...trace, steps: [], tokens: "", council: [] }));
           note(
             `STREAM UNAVAILABLE (${message(error)}) · POST ${API_BASE}/api/decompose`,
           );

@@ -3,6 +3,11 @@
 // backend/service.py `_simulate_course`, so a detached or pinned desk reads the
 // same distribution shape the backend would draw from the same course book.
 
+import {
+  detectCongestion,
+  varianceInflation,
+  type CongestionCluster,
+} from "@/lib/congestion";
 import { seededRandom } from "@/lib/engine";
 import type { Assignment, Course, TerminalState } from "@/types";
 
@@ -52,6 +57,8 @@ export interface CourseSimulation {
 export interface MonteCarloResponse {
   iterations: number;
   courses: CourseSimulation[];
+  /** Cross-course deadline pile-ups; absent from backends that predate it. */
+  congestion_matrix?: CongestionCluster[];
 }
 
 /** Work that can still move the grade, in the backend's order (by id). */
@@ -98,6 +105,8 @@ export function simulateCourse(
   overrides: Record<string, number>,
   /** Receives the unsorted simulated grades, path by path, when a distribution is drawn. */
   pathSamples?: number[],
+  /** Assignment id → variance multiplier for congested deadlines (spread × √). */
+  inflation?: Map<string, number>,
 ): CourseSimulation {
   const remaining = remainingWork(course.id, assignments);
   const openWeight = remaining.reduce((sum, a) => sum + a.weight, 0);
@@ -153,12 +162,13 @@ export function simulateCourse(
     const random = seededRandom(
       hash(`apex-monte-carlo:${course.id}:${assignment.id}`),
     );
+    const sigma = spread * Math.sqrt(inflation?.get(assignment.id) ?? 1);
     for (let i = 0; i < iterations; i += 1) {
       const z =
         Math.sqrt(-2 * Math.log(Math.max(random(), 1e-12))) *
         Math.cos(2 * Math.PI * random());
       paths[i] +=
-        marginal_impact * Math.min(100, Math.max(0, baseline + spread * z));
+        marginal_impact * Math.min(100, Math.max(0, baseline + sigma * z));
     }
   });
   pathSamples?.push(...paths);
@@ -185,10 +195,15 @@ export function simulateCourse(
   };
 }
 
-/** The offline engine: the backend's response, computed from the terminal's own course book. */
+/**
+ * The offline engine: the backend's response, computed from the terminal's own
+ * course book. Deliverables caught in a deadline cluster draw with inflated
+ * spread, and the clusters ride along as `congestion_matrix`.
+ */
 export function simulateLocally(
   request: MonteCarloRequest,
   state: Pick<TerminalState, "courses" | "assignments">,
+  now = Date.now(),
 ): MonteCarloResponse {
   const iterations = Math.round(
     Math.min(
@@ -204,10 +219,24 @@ export function simulateLocally(
   const courses = state.courses.filter(
     (c) => request.course_id === undefined || c.id === request.course_id,
   );
+  const clusters = detectCongestion(state.assignments, now);
+  const inflation = varianceInflation(clusters);
   return {
     iterations,
     courses: courses.map((course) =>
-      simulateCourse(course, state.assignments, iterations, overrides),
+      simulateCourse(
+        course,
+        state.assignments,
+        iterations,
+        overrides,
+        undefined,
+        inflation,
+      ),
+    ),
+    congestion_matrix: clusters.filter(
+      (c) =>
+        request.course_id === undefined ||
+        c.course_ids.includes(request.course_id),
     ),
   };
 }

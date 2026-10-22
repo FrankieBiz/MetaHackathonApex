@@ -14,6 +14,7 @@ import { OrderBook } from "@/components/OrderBook";
 import { TaskTree } from "@/components/TaskTree";
 import { TokenModal } from "@/components/TokenModal";
 import { TopBar } from "@/components/TopBar";
+import { useMarginCall } from "@/components/MarginCallModal";
 import { useDossier } from "@/components/PortfolioReportModal";
 import { Key, Spinner } from "@/components/ui";
 import { API_BASE } from "@/lib/api";
@@ -110,10 +111,15 @@ function useHotkeys() {
 
       const key = event.key.toLowerCase();
 
-      // Sound toggle (M)
+      // Margin call desk (M) · sound toggle (Shift+M)
       if (key === "m" && !event.ctrlKey && !event.metaKey && !event.altKey) {
-        event.preventDefault();
-        state.toggleSound();
+        if (event.shiftKey) {
+          event.preventDefault();
+          state.toggleSound();
+        } else if (state.data) {
+          event.preventDefault();
+          useMarginCall.getState().setOpen(true);
+        }
         return;
       }
 
@@ -244,7 +250,7 @@ function StatusBar() {
           API {API_BASE.replace(/^https?:\/\//, "")}
         </span>
         <span className="hidden shrink-0 text-ink-3 lg:inline">
-          ⌘/CTRL+K CMDS · J/K QUEUE · T TRIAGE · R DOSSIER · M AUDIO · CTRL+SHIFT+D SIM · ? HELP
+          ⌘/CTRL+K CMDS · J/K QUEUE · T TRIAGE · R DOSSIER · M MARGIN CALL · SHIFT+M AUDIO · CTRL+SHIFT+D SIM · ? HELP
         </span>
       </div>
     </footer>
