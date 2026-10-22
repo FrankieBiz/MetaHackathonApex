@@ -35,10 +35,17 @@ import {
   type CongestionCluster,
   type CongestionTier,
 } from "@/lib/congestion";
+import { haltIndex, type HaltState } from "@/lib/circuitBreaker";
 import { countdown, score as fmtScore } from "@/lib/format";
 import { activeCourseOf, isRemote, useTerminal } from "@/store/terminal";
 import { studyOpportunity } from "@/lib/study";
 import { exportPortfolio } from "@/lib/portfolioExport";
+import {
+  CircuitBreakerBanner,
+  HaltBadge,
+  useCircuitBreaker,
+} from "@/components/CircuitBreaker";
+import { useNegotiator } from "@/components/NegotiationModal";
 import type { Assignment, Course } from "@/types";
 
 const TIER_COLOR: Record<PriorityTier, string> = {
@@ -335,15 +342,25 @@ function Inspector() {
             </span>
           )}
         </span>
-        {assignment &&
-          (completed ? (
-            <span className="shrink-0 text-up">✓ FILLED</span>
-          ) : (
-            <TriageButton
-              assignment={assignment}
-              label="⚡ DECONSTRUCT WITH META LLAMA"
-            />
-          ))}
+        {assignment && (
+          <span className="flex shrink-0 items-center gap-1.5">
+            <Key
+              onClick={() => useNegotiator.getState().open(assignment.id)}
+              title="Office hours negotiator: draft an extension, regrade, or office hours petition (hotkey O)"
+              aria-label={`Open the office hours negotiator for ${assignment.title}`}
+            >
+              ☎<span className="hidden @lg:inline">&nbsp;OFFICE HOURS</span>
+            </Key>
+            {completed ? (
+              <span className="text-up">✓ FILLED</span>
+            ) : (
+              <TriageButton
+                assignment={assignment}
+                label="⚡ DECONSTRUCT WITH META LLAMA"
+              />
+            )}
+          </span>
+        )}
       </header>
 
       {!assignment ? (
@@ -517,6 +534,15 @@ export function OrderBook() {
     () => new Map((courses ?? []).map((c) => [c.id, c.course_code])),
     [courses],
   );
+  const breaker = useCircuitBreaker();
+  const halts = useMemo<Map<string, HaltState>>(
+    () => (breaker ? haltIndex(assignments, breaker.status) : new Map()),
+    [assignments, breaker],
+  );
+  const shielded = queue.find(
+    (e) => halts.get(e.assignment.id) === "protected",
+  )?.assignment;
+  const halted = [...halts.values()].filter((h) => h === "halted").length;
 
   const max = queue[0]?.priority ?? 0;
   const overdue = queue.filter((e) => e.hours !== null && e.hours < 0).length;
@@ -592,6 +618,20 @@ export function OrderBook() {
             );
           })}
         </nav>
+        {breaker && (
+          <CircuitBreakerBanner
+            {...breaker}
+            codes={codes}
+            onNegotiate={
+              shielded
+                ? () => {
+                    select(shielded.id);
+                    useNegotiator.getState().open(shielded.id);
+                  }
+                : undefined
+            }
+          />
+        )}
         <div className="min-h-[96px] shrink overflow-y-auto">
           <table className="w-full border-collapse text-[12px]">
             <caption className="sr-only">
@@ -672,6 +712,13 @@ export function OrderBook() {
                             codes={codes}
                           />
                         )}
+                        {breaker && halts.has(assignment.id) && (
+                          <HaltBadge
+                            state={halts.get(assignment.id)!}
+                            level={breaker.status.level}
+                            courseCode={assignment.course_code}
+                          />
+                        )}
                       </span>
                     </td>
                     <td
@@ -735,6 +782,10 @@ export function OrderBook() {
             <span className={clustered.size ? "text-accent" : "text-ink"}>
               {clustered.size}
             </span>
+          </span>
+          <span title="Open deliverables the circuit breaker pauses to protect below-target courses">
+            Halted{" "}
+            <span className={halted ? "text-down" : "text-ink"}>{halted}</span>
           </span>
           <span className="ml-auto hidden @lg:inline">
             Priority = wt × pts / max(hrs, 1)

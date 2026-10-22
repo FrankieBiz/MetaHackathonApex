@@ -19,6 +19,7 @@ from .ai_engine import (
     extract_syllabus,
     fallback_tree,
     generate_defense_council,
+    generate_negotiation_petition,
     generate_study_recommendation,
     grade_floor,
     run_triage_agent,
@@ -32,6 +33,7 @@ from .config import Settings
 from .models import (
     AgentReasoningStep,
     AssignmentModel,
+    CircuitBreakerStatus,
     CongestionCluster,
     CourseModel,
     DecomposeResponse,
@@ -42,6 +44,8 @@ from .models import (
     MarginCallReport,
     MarginCallWebhookPayload,
     MarginRestorationAction,
+    NegotiationPetition,
+    NegotiationPetitionRequest,
     StrictModel,
     StudyInsertRequest,
     SubTaskNode,
@@ -513,6 +517,81 @@ def generate_margin_call(state: TerminalState) -> MarginCallReport:
     )
 
 
+def evaluate_circuit_breaker(state: TerminalState) -> CircuitBreakerStatus:
+    """Recommend academic workload restrictions without changing tasks or budgets.
+
+    This is an academic Rule 80B analog, using course percentage-point shortfalls,
+    not market drawdown percentages. With no elective/required course metadata,
+    only known-grade courses at/above target are candidates for a temporary pause.
+    Unknown grades are never assumed healthy. A mean 20-point shortfall represents
+    liquidation; the existing CRITICAL_INTERVENTION stance also covers mild breaches.
+    """
+    observed = [c for c in state.courses if c.current_score is not None]
+    breached = [c for c in observed if c.current_score < c.target_score]
+    deficit = fmean(c.target_score - c.current_score for c in observed) if observed else 0.0
+    level = "NORMAL"
+    reason = "No posted course crosses an intervention threshold."
+    if any(c.current_score < 55 for c in observed) or deficit >= 20:
+        level = "LEVEL_3_HALT"
+        reason = "A course is below 55% or the portfolio deficit reaches 20 percentage points."
+    elif len(breached) >= 2 or any(c.current_score < 65 for c in observed):
+        level = "LEVEL_2_RESTRICTION"
+        reason = "Multiple courses are below target or a course is below 65%."
+    elif any(c.target_score - c.current_score > 5 for c in breached):
+        level = "LEVEL_1_CAUTION"
+        reason = "A course is more than five percentage points below its target."
+
+    triggered = level != "NORMAL"
+    restricted = level in ("LEVEL_2_RESTRICTION", "LEVEL_3_HALT")
+    healthy = {
+        c.id for c in observed if c.current_score >= c.target_score and c.current_score >= 65
+    }
+    vulnerable = {c.id for c in state.courses if c.id not in healthy}
+    active = [a for a in state.assignments if not a.graded and a.status != "completed"]
+    protected = [a for a in active if a.course_id in vulnerable and a.weight > 0]
+    # Zero-weight work is deferred only at HALT, and only when a critical path exists.
+    deferred = (
+        [a for a in active if a.course_id in healthy or (level == "LEVEL_3_HALT" and a.weight == 0)]
+        if restricted and protected
+        else []
+    )
+    minutes = sum(
+        max(0, node.estimated_minutes - node.actual_minutes)
+        for a in deferred
+        for node in walk(a.subtasks)
+        if not node.children and not node.is_completed
+    )
+    recommendations = []
+    if triggered:
+        recommendations.append("Protect required rubric criteria in below-target courses first.")
+        for a in sorted(active, key=lambda a: a.id):
+            if a.weight == 0:
+                recommendations.append(
+                    f"Review low-yield subtasks for {a.id}: {a.title}; "
+                    "zero recorded weight may mean the grade weight is unknown."
+                )
+        if deferred:
+            recommendations.append(
+                f"Temporarily defer non-critical work and propose moving {minutes} remaining "
+                "study minutes to protected assignments; confirm course requirements first."
+            )
+        if level == "LEVEL_3_HALT":
+            recommendations.append(
+                "Discuss a recovery plan with the instructor or academic adviser."
+            )
+    if len(observed) < len(state.courses):
+        recommendations.append("Verify missing course grades before reallocating their study time.")
+    return CircuitBreakerStatus(
+        level=level,
+        triggered=triggered,
+        halted_course_ids=sorted({a.course_id for a in deferred if a.course_id in healthy}),
+        protected_assignment_ids=sorted(a.id for a in protected) if triggered else [],
+        reallocated_minutes=minutes,
+        reason=reason,
+        recommendations=recommendations,
+    )
+
+
 def _local_portfolio_memo(report: PortfolioReportResponse) -> str:
     graded = [c for c in report.course_breakdown if c.current_score is not None]
     standing = (
@@ -627,6 +706,23 @@ class TerminalService:
 
     async def margin_call(self) -> MarginCallReport:
         return await asyncio.to_thread(generate_margin_call, await self.state())
+
+    async def circuit_breaker(self) -> CircuitBreakerStatus:
+        return evaluate_circuit_breaker(await self.state())
+
+    async def negotiate(
+        self, assignment_id: str, request: NegotiationPetitionRequest
+    ) -> NegotiationPetition:
+        snapshot = await self.state()
+        assignment = next((a for a in snapshot.assignments if a.id == assignment_id), None)
+        if assignment is None:
+            raise KeyError(assignment_id)
+        course = next((c for c in snapshot.courses if c.id == assignment.course_id), None)
+        if course is None:
+            raise KeyError(assignment.course_id)
+        return await generate_negotiation_petition(
+            assignment, course, request, settings=self.settings, client=self.llm
+        )
 
     async def portfolio_report(self) -> PortfolioReportResponse:
         report = await asyncio.to_thread(_portfolio_report, await self.state())

@@ -15,6 +15,8 @@ import { TaskTree } from "@/components/TaskTree";
 import { TokenModal } from "@/components/TokenModal";
 import { TopBar } from "@/components/TopBar";
 import { useMarginCall } from "@/components/MarginCallModal";
+import { openMorningBell } from "@/components/MorningBell";
+import { useNegotiator } from "@/components/NegotiationModal";
 import { useDossier } from "@/components/PortfolioReportModal";
 import { Key, Spinner } from "@/components/ui";
 import { API_BASE } from "@/lib/api";
@@ -128,6 +130,24 @@ function useHotkeys() {
         if (state.selectedId) {
           event.preventDefault();
           void state.triage(state.selectedId);
+        }
+        return;
+      }
+
+      // Morning bell voice briefing (B)
+      if (key === "b" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        if (state.data) {
+          event.preventDefault();
+          openMorningBell();
+        }
+        return;
+      }
+
+      // Office hours negotiator for the selected deliverable (O)
+      if (key === "o" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        if (state.selectedId) {
+          event.preventDefault();
+          useNegotiator.getState().open(state.selectedId);
         }
         return;
       }
@@ -250,7 +270,7 @@ function StatusBar() {
           API {API_BASE.replace(/^https?:\/\//, "")}
         </span>
         <span className="hidden shrink-0 text-ink-3 lg:inline">
-          ⌘/CTRL+K CMDS · J/K QUEUE · T TRIAGE · R DOSSIER · M MARGIN CALL · SHIFT+M AUDIO · CTRL+SHIFT+D SIM · ? HELP
+          ⌘/CTRL+K CMDS · J/K QUEUE · T TRIAGE · O OFFICE HRS · R DOSSIER · M MARGIN CALL · B BELL · SHIFT+M AUDIO · CTRL+SHIFT+D SIM · ? HELP
         </span>
       </div>
     </footer>

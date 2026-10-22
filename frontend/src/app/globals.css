@@ -213,10 +213,24 @@
   animation: caret 1s steps(1) infinite;
 }
 
+/* ----------------------------------------------- circuit breaker & bell */
+
+/* Halted-market blink and the bell's on-air light; opacity only. */
+@keyframes halt-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.halt-pulse {
+  animation: halt-pulse 1.2s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tape,
   .log-line,
   .caret,
+  .halt-pulse,
   .tick-flash::after {
     animation: none;
   }

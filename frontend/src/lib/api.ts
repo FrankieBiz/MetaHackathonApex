@@ -3,6 +3,11 @@
 
 import { z } from "zod";
 import {
+  BREAKER_LEVELS,
+  evaluateCircuitBreaker,
+  type CircuitBreakerStatus,
+} from "@/lib/circuitBreaker";
+import {
   COUNCIL_ROLES,
   localDefenseCouncil,
   type DefenseCouncilDeliberation,
@@ -13,6 +18,13 @@ import {
   type MarginCallReport,
 } from "@/lib/marginCall";
 import { createMockState } from "@/lib/mockData";
+import {
+  PETITION_TYPES,
+  localNegotiationPetition,
+  normalizeReason,
+  type NegotiationPetition,
+  type PetitionType,
+} from "@/lib/negotiation";
 import {
   ACADEMIC_STANCES,
   generateLocalReport,
@@ -1042,6 +1054,149 @@ export async function marginCall(
   }
 }
 
+// -------------------------------------------------------- circuit breaker
+
+const CIRCUIT_BREAKER_DEADLINE_MS = 5_000;
+
+const CircuitBreakerBody = z.object({
+  level: z.enum(BREAKER_LEVELS),
+  triggered: z.boolean(),
+  halted_course_ids: z.array(id),
+  protected_assignment_ids: z.array(id),
+  reallocated_minutes: z.number().int().nonnegative(),
+  reason: z.string().trim().min(1),
+  recommendations: z.array(z.string()).catch([]),
+});
+
+/**
+ * A breaker check. Like a margin call it never rejects: an offline desk, or a
+ * slow, failing, or malformed backend answer, is evaluated locally from
+ * `state` instead, flagged `local` with the cause attached.
+ */
+export type CircuitBreakerRun =
+  | { source: "backend"; status: CircuitBreakerStatus }
+  | { source: "local"; status: CircuitBreakerStatus; cause: ApiError };
+
+export async function circuitBreaker(
+  state: Pick<TerminalState, "courses" | "assignments">,
+  { offline = false }: { offline?: boolean } = {},
+): Promise<CircuitBreakerRun> {
+  const local = (cause: ApiError): CircuitBreakerRun => ({
+    source: "local",
+    status: evaluateCircuitBreaker(state),
+    cause,
+  });
+  // The pinned or detached desk never contacts the backend.
+  if (offline) {
+    return local(new ApiError("Simulation desk is offline", "network"));
+  }
+  try {
+    const raw = await request(
+      "/api/v1/portfolio/circuit-breaker",
+      { method: "POST" },
+      CIRCUIT_BREAKER_DEADLINE_MS,
+    );
+    const status = CircuitBreakerBody.parse(raw);
+    if (status.triggered !== (status.level !== "NORMAL")) {
+      throw new ApiError("Breaker level and trigger disagree", "parse");
+    }
+    return { source: "backend", status };
+  } catch (error) {
+    return local(
+      error instanceof ApiError
+        ? error
+        : new ApiError(
+            "/api/v1/portfolio/circuit-breaker sent a malformed status",
+            "parse",
+          ),
+    );
+  }
+}
+
+// ---------------------------------------------------- office hours petition
+
+/** One bounded model pass on the backend; past this the local template drafts. */
+const NEGOTIATE_DEADLINE_MS = 60_000;
+
+const line = z.string().trim().min(1);
+
+const PetitionBody = z.object({
+  assignment_id: id,
+  petition_type: z.enum(PETITION_TYPES),
+  instructor_name: line,
+  email_subject: line,
+  email_body: line,
+  office_hours_pitch_60s: z.array(line).min(1).max(6),
+  syllabus_clauses_cited: z.array(line).max(10).catch([]),
+  source: z.enum(["ai", "local"]),
+  telemetry: Telemetry,
+});
+
+/**
+ * A petition draft. An offline desk, or a slow, failing, or malformed backend
+ * answer, is drafted by the local template instead, flagged `local` with the
+ * cause attached. Rejects only for an id missing from `state`.
+ */
+export type NegotiationRun =
+  | { source: "backend"; petition: NegotiationPetition }
+  | { source: "local"; petition: NegotiationPetition; cause: ApiError };
+
+export async function negotiatePetition(
+  assignmentId: string,
+  petitionType: PetitionType,
+  studentReason: string | null,
+  state: Pick<TerminalState, "assignments">,
+  { offline = false }: { offline?: boolean } = {},
+): Promise<NegotiationRun> {
+  const reason = normalizeReason(studentReason);
+  const started = performance.now();
+  const local = (cause: ApiError): NegotiationRun => {
+    const assignment = state.assignments.find((a) => a.id === assignmentId);
+    if (!assignment) throw new ApiError("No such deliverable", "parse");
+    return {
+      source: "local",
+      petition: localNegotiationPetition(
+        assignment,
+        { petition_type: petitionType, student_reason: reason },
+        started,
+      ),
+      cause,
+    };
+  };
+  // The pinned or detached desk never contacts the backend.
+  if (offline) {
+    return local(new ApiError("Simulation desk is offline", "network"));
+  }
+  const path = `/api/v1/triage/${encodeURIComponent(assignmentId)}/negotiate`;
+  try {
+    const raw = await request(
+      path,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          petition_type: petitionType,
+          student_reason: reason,
+        }),
+      },
+      NEGOTIATE_DEADLINE_MS,
+    );
+    const petition = PetitionBody.parse(raw);
+    if (petition.assignment_id !== assignmentId) {
+      throw new ApiError("Petition drafted for a different deliverable", "parse");
+    }
+    if (petition.petition_type !== petitionType) {
+      throw new ApiError("Petition drafted for a different request", "parse");
+    }
+    return { source: "backend", petition };
+  } catch (error) {
+    return local(
+      error instanceof ApiError
+        ? error
+        : new ApiError(`${path} sent a malformed petition`, "parse"),
+    );
+  }
+}
+
 export const api = {
   state: () => intercept(readState),
 
@@ -1155,6 +1310,8 @@ export const api = {
   portfolioReport,
   defenseCouncil,
   marginCall,
+  circuitBreaker,
+  negotiatePetition,
 
   patchSubtask: (
     subtaskId: string,

@@ -2,6 +2,7 @@
 
 import { Fragment, useState } from "react";
 import { DefenseCouncil } from "@/components/DefenseCouncil";
+import { useNegotiator } from "@/components/NegotiationModal";
 import { Key, Meter, Panel, Spinner, TRACE_STATUS } from "@/components/ui";
 import { useNow } from "@/hooks/useNow";
 import { countdown, minutes, score } from "@/lib/format";
@@ -648,32 +649,41 @@ export function TaskTree() {
           </div>
         )}
 
-        <div
-          role="tablist"
-          aria-label="Execution deck view"
-          className="flex shrink-0 gap-1 border-b border-line px-2.5 py-1"
-        >
-          {(
-            [
-              ["breakdown", "TRACE"],
-              ["council", "DEFENSE COUNCIL"],
-            ] as [DeckTab, string][]
-          ).map(([value, label]) => (
-            <Key
-              key={value}
-              role="tab"
-              id={`deck-tab-${value}`}
-              aria-selected={tab === value}
-              aria-controls="deck-body"
-              active={tab === value}
-              onClick={() => setTab(value)}
-            >
-              {label}
-              {value === "council" && councilSeats > 0 && (
-                <span className="ml-1 text-up">●</span>
-              )}
-            </Key>
-          ))}
+        <div className="flex shrink-0 items-center gap-1 border-b border-line px-2.5 py-1">
+          <div
+            role="tablist"
+            aria-label="Execution deck view"
+            className="flex gap-1"
+          >
+            {(
+              [
+                ["breakdown", "TRACE"],
+                ["council", "DEFENSE COUNCIL"],
+              ] as [DeckTab, string][]
+            ).map(([value, label]) => (
+              <Key
+                key={value}
+                role="tab"
+                id={`deck-tab-${value}`}
+                aria-selected={tab === value}
+                aria-controls="deck-body"
+                active={tab === value}
+                onClick={() => setTab(value)}
+              >
+                {label}
+                {value === "council" && councilSeats > 0 && (
+                  <span className="ml-1 text-up">●</span>
+                )}
+              </Key>
+            ))}
+          </div>
+          <Key
+            className="ml-auto"
+            onClick={() => useNegotiator.getState().open(assignment.id)}
+            title="Office hours negotiator: extension request, regrade petition, or a 60-second office hours pitch (hotkey O)"
+          >
+            ☎ NEGOTIATE
+          </Key>
         </div>
 
         {tab === "council" ? (

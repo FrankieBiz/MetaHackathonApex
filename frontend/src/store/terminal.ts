@@ -183,6 +183,8 @@ interface TerminalStore {
   tokenOpen: boolean;
   soundOn: boolean;
   toggleSound: () => void;
+  /** Writes a line to the status bar log. */
+  logEvent: (level: TerminalEvent["level"], text: string) => void;
   scenario: Scenario;
   setScenarioScore: (assignmentId: string, score: number | undefined) => void;
   resetScenario: (courseId?: string) => void;
@@ -540,6 +542,8 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
       const next = toggleFeedbackSound();
       set({ soundOn: next });
     },
+
+    logEvent: log,
 
     setScenarioScore: (assignmentId, score) =>
       set((s) => {

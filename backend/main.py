@@ -16,11 +16,14 @@ from .canvas_client import CanvasClient
 from .config import Settings, get_settings
 from .models import (
     AgentReasoningStep,
+    CircuitBreakerStatus,
     DecomposeRequest,
     DecomposeResponse,
     DefenseCouncilDeliberation,
     InferenceTelemetry,
     MarginCallReport,
+    NegotiationPetition,
+    NegotiationPetitionRequest,
     StrictModel,
     StudyInsertRequest,
     StudyTriagePlan,
@@ -237,6 +240,16 @@ def create_app(
     @app.post("/api/v1/portfolio/margin-call", response_model=MarginCallReport)
     async def margin_call(request: Request) -> MarginCallReport:
         return await request.app.state.terminal.margin_call()
+
+    @app.post("/api/v1/portfolio/circuit-breaker", response_model=CircuitBreakerStatus)
+    async def circuit_breaker(request: Request) -> CircuitBreakerStatus:
+        return await request.app.state.terminal.circuit_breaker()
+
+    @app.post("/api/v1/triage/{assignment_id}/negotiate", response_model=NegotiationPetition)
+    async def negotiate(
+        assignment_id: str, body: NegotiationPetitionRequest, request: Request
+    ) -> NegotiationPetition:
+        return await request.app.state.terminal.negotiate(assignment_id, body)
 
     @app.get("/api/v1/syllabus/presets", response_model=list[SyllabusPresetDescriptor])
     async def syllabus_presets() -> list[SyllabusPresetDescriptor]:

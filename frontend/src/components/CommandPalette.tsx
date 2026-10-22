@@ -5,6 +5,8 @@ import { useEscape, useRestoreFocus } from "@/components/ui";
 import { useSyllabusIngest } from "@/components/SyllabusIngestModal";
 import { useMonteCarlo } from "@/components/MonteCarloModal";
 import { useMarginCall } from "@/components/MarginCallModal";
+import { openMorningBell } from "@/components/MorningBell";
+import { useNegotiator } from "@/components/NegotiationModal";
 import { useDossier } from "@/components/PortfolioReportModal";
 import { useCouncil } from "@/store/council";
 import { rankQueue } from "@/lib/engine";
@@ -188,7 +190,21 @@ function PaletteDialog({
       shortcut: "M",
       run: () => useMarginCall.getState().setOpen(true),
     });
+    actions.push({
+      id: "morning-bell",
+      label: "MORNING BELL: VOICE BRIEFING",
+      hint: "Bell chime, then the book, breaker, and today's deadlines read aloud",
+      shortcut: "B",
+      run: openMorningBell,
+    });
     if (selected) {
+      actions.push({
+        id: "office-hours",
+        label: `OFFICE HOURS NEGOTIATOR · ${selected.course_code}`,
+        hint: `Extension, regrade, or office hours petition for ${selected.title}`,
+        shortcut: "O",
+        run: () => useNegotiator.getState().open(selected.id),
+      });
       actions.push({
         id: "defense-council",
         label: `DEFENSE COUNCIL · ${selected.course_code}`,

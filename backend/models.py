@@ -280,6 +280,48 @@ class InferenceTelemetry(StrictModel):
     tokens_per_sec: Annotated[float, Field(ge=0)] | None = 0.0
 
 
+CircuitBreakerLevel = Literal["NORMAL", "LEVEL_1_CAUTION", "LEVEL_2_RESTRICTION", "LEVEL_3_HALT"]
+
+
+class CircuitBreakerStatus(StrictModel):
+    level: CircuitBreakerLevel
+    triggered: bool
+    halted_course_ids: list[Identifier]
+    protected_assignment_ids: list[Identifier]
+    # Proposed remaining study time to move; the evaluator never edits saved plans.
+    reallocated_minutes: Annotated[int, Field(ge=0)]
+    reason: Annotated[str, Field(min_length=1, max_length=2000)]
+    recommendations: list[str]
+
+
+PetitionType = Literal["extension", "regrade", "office_hours_script"]
+
+
+class NegotiationPetitionRequest(StrictModel):
+    petition_type: PetitionType
+    student_reason: Annotated[str, Field(min_length=1, max_length=4000, pattern=r"\S")] | None = (
+        None
+    )
+
+
+class NegotiationPetition(StrictModel):
+    assignment_id: Identifier
+    petition_type: PetitionType
+    instructor_name: Annotated[str, Field(min_length=1, max_length=500, pattern=r"\S")]
+    email_subject: Annotated[str, Field(min_length=1, max_length=500, pattern=r"\S")]
+    email_body: Annotated[str, Field(min_length=1, max_length=12000, pattern=r"\S")]
+    office_hours_pitch_60s: Annotated[
+        list[Annotated[str, Field(min_length=1, max_length=1500, pattern=r"\S")]],
+        Field(min_length=1, max_length=6),
+    ]
+    syllabus_clauses_cited: Annotated[
+        list[Annotated[str, Field(min_length=1, max_length=2000, pattern=r"\S")]],
+        Field(max_length=10),
+    ]
+    source: Literal["ai", "local"]
+    telemetry: InferenceTelemetry
+
+
 class DefenseCouncilMember(StrictModel):
     role: Literal["Professor", "Student", "Arbitrator"]
     position: Annotated[str, Field(min_length=1, max_length=1500, pattern=r"\S")]

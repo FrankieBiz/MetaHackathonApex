@@ -13,7 +13,14 @@ import {
   SyllabusIngestModal,
   useSyllabusIngest,
 } from "@/components/SyllabusIngestModal";
+import { BreakerAlarm, useBreakerSync } from "@/components/CircuitBreaker";
 import { MarginCallModal, useMarginCall } from "@/components/MarginCallModal";
+import {
+  BellKey,
+  MorningBellModal,
+  useMorningBell,
+} from "@/components/MorningBell";
+import { NegotiationModal } from "@/components/NegotiationModal";
 import { MonteCarloModal, useMonteCarlo } from "@/components/MonteCarloModal";
 import {
   PortfolioReportModal,
@@ -37,6 +44,7 @@ import { breachCount } from "@/lib/marginCall";
 import { isRemote, useTerminal } from "@/store/terminal";
 import { startTour } from "@/lib/tour";
 import { armStartupChime, playAlert } from "@/lib/feedback";
+import { armMorningBell } from "@/lib/morningBell";
 import type { ConnectionMode, Course, DataOrigin } from "@/types";
 
 function Clock() {
@@ -423,8 +431,25 @@ function useModifierLabel() {
   );
 }
 
+/** Lets the startup chime finish before the first-of-the-morning bell. */
+const AUTO_BELL_DELAY_MS = 500;
+
 export function TopBar() {
   useEffect(() => armStartupChime(), []);
+  useBreakerSync();
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const disarm = armMorningBell(() => {
+      timer = setTimeout(
+        () => useMorningBell.getState().ring({ auto: true }),
+        AUTO_BELL_DELAY_MS,
+      );
+    });
+    return () => {
+      disarm();
+      clearTimeout(timer);
+    };
+  }, []);
   const syncing = useTerminal((s) => s.syncing);
   const armed = useTerminal((s) => s.credentials !== null);
   const sync = useTerminal((s) => s.sync);
@@ -452,6 +477,7 @@ export function TopBar() {
         </div>
         <Clock />
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
+          <BreakerAlarm />
           <ConnectionBadge />
           <EngineBadge />
           <Key
@@ -468,6 +494,7 @@ export function TopBar() {
           >
             SND {soundOn ? "ON" : "OFF"}
           </Key>
+          <BellKey />
           <Key
             tone="accent"
             onClick={() => void sync()}
@@ -539,6 +566,8 @@ export function TopBar() {
       <MonteCarloModal />
       <PortfolioReportModal />
       <MarginCallModal />
+      <NegotiationModal />
+      <MorningBellModal />
     </header>
   );
 }

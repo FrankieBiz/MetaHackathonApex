@@ -200,6 +200,44 @@ export function playAlert(): void {
   }
 }
 
+/** Struck-bell partials: frequency ratio to the strike note, relative level, ring-out seconds. */
+const BELL_PARTIALS = [
+  [0.5, 0.35, 2.2],
+  [1, 1, 1.8],
+  [1.2, 0.45, 1.2],
+  [1.5, 0.3, 1],
+  [2, 0.55, 0.9],
+  [2.76, 0.25, 0.6],
+  [5.4, 0.12, 0.35],
+] as const;
+const BELL_NOTE = 659.25;
+const BELL_STRIKES = [0, 0.38, 0.76];
+
+/**
+ * The morning bell: three strikes of inharmonic partials, each ringing out on
+ * its own decay. Returns its length in seconds, 0 when silent.
+ */
+export function playBell(): number {
+  if (!soundEnabled()) return 0;
+  const ctx = getContext();
+  if (!ctx) return 0;
+
+  for (const start of BELL_STRIKES) {
+    for (const [ratio, level, duration] of BELL_PARTIALS) {
+      const frequency = BELL_NOTE * ratio;
+      scheduleTone(ctx, {
+        type: "sine",
+        startFreq: frequency,
+        endFreq: frequency,
+        start,
+        duration,
+        volume: 0.045 * level,
+      });
+    }
+  }
+  return BELL_STRIKES.at(-1)! + Math.max(...BELL_PARTIALS.map((p) => p[2]));
+}
+
 /** Short vibration pulse on devices that support the Vibration API. */
 export function triggerHaptic(ms = 12): void {
   if (typeof navigator === "undefined" || typeof navigator.vibrate !== "function") return;
