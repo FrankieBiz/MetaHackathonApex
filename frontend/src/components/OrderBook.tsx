@@ -504,6 +504,7 @@ export function OrderBook() {
   const assignments = useTerminal((s) => s.data?.assignments ?? NO_ASSIGNMENTS);
   const selectedId = useTerminal((s) => s.selectedId);
   const select = useTerminal((s) => s.select);
+  const studentMode = useTerminal((s) => s.studentMode);
   const now = useNow(1000);
   const [scope, setScope] = useState<"open" | "all">("open");
   const body = useRef<HTMLTableSectionElement>(null);
@@ -573,7 +574,11 @@ export function OrderBook() {
 
   return (
     <Panel
-      title="ORDER BOOK // PRIORITY EXECUTION QUEUE"
+      title={
+        studentMode
+          ? "DELIVERABLE QUEUE // PRIORITY EXECUTION"
+          : "ORDER BOOK // PRIORITY EXECUTION QUEUE"
+      }
       actions={
         <Segmented
           label="Queue scope"
@@ -586,6 +591,12 @@ export function OrderBook() {
         />
       }
     >
+      {studentMode && (
+        <div className="flex shrink-0 items-center justify-between border-b border-line bg-accent/5 px-2.5 py-1 text-[10px] text-accent">
+          <span>Upcoming deliverables ranked by urgency, grade weight, and floor impact</span>
+          <span className="text-ink-3">CLICK ROW TO LOAD POMODORO DECK</span>
+        </div>
+      )}
       {/* The queue scrolls on its own so the inspector stays docked; with few
           rows the inspector grows into the space instead. */}
       <div className="flex h-full flex-col">

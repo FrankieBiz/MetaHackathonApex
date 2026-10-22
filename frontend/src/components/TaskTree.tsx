@@ -532,6 +532,7 @@ export function TaskTree() {
   const [traceOpen, setTraceOpen] = useState(true);
   const remote = useTerminal((s) => isRemote(s.mode));
   const triage = useTerminal((s) => s.triage);
+  const studentMode = useTerminal((s) => s.studentMode);
   const tab = useCouncil((s) => s.tab);
   const setTab = useCouncil((s) => s.setTab);
   const councilSeats = useCouncil((s) =>
@@ -552,7 +553,11 @@ export function TaskTree() {
   if (!assignment) {
     return (
       <Panel
-        title="EXECUTION DECK // RECURSIVE WORK BREAKDOWN TREE"
+        title={
+          studentMode
+            ? "EXECUTION DECK // META LLAMA 25-MIN POMODORO PLAN"
+            : "EXECUTION DECK // RECURSIVE WORK BREAKDOWN TREE"
+        }
         actions={studyAction}
       >
         {course && <StudySprint course={course} now={now} />}
@@ -572,7 +577,11 @@ export function TaskTree() {
 
   return (
     <Panel
-      title="EXECUTION DECK // RECURSIVE WORK BREAKDOWN TREE"
+      title={
+        studentMode
+          ? "EXECUTION DECK // META LLAMA 25-MIN POMODORO PLAN"
+          : "EXECUTION DECK // RECURSIVE WORK BREAKDOWN TREE"
+      }
       actions={studyAction}
     >
       <div className="flex min-h-full flex-col">

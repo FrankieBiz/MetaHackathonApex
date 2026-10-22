@@ -7,6 +7,7 @@
 import { useTerminal } from "@/store/terminal";
 import { isUntriaged, leaves, rankQueue } from "@/lib/engine";
 import { playFill } from "@/lib/feedback";
+import { useTourStore } from "@/store/tourStore";
 
 /**
  * The what-if simulator keeps its scores in local state, so the tour announces
@@ -54,16 +55,16 @@ function pause(ms: number): Promise<void> {
   });
 }
 
-const onAbort = () => stopTour();
+const onKeyDown = (event: KeyboardEvent) => {
+  if (event.key === "Escape") stopTour();
+};
 
 function attach() {
-  window.addEventListener("keydown", onAbort);
-  window.addEventListener("pointerdown", onAbort);
+  window.addEventListener("keydown", onKeyDown);
 }
 
 function detach() {
-  window.removeEventListener("keydown", onAbort);
-  window.removeEventListener("pointerdown", onAbort);
+  window.removeEventListener("keydown", onKeyDown);
 }
 
 function teardown() {
@@ -72,6 +73,7 @@ function teardown() {
   if (armTimer !== null) window.clearTimeout(armTimer);
   armTimer = null;
   cancelPause = null;
+  useTourStore.getState().stop();
 }
 
 export function stopTour(): void {
@@ -97,6 +99,8 @@ export async function startTour(): Promise<void> {
   }, 0);
 
   try {
+    useTourStore.getState().setRunning(true);
+    useTourStore.getState().setBeatIndex(0);
     const store = useTerminal.getState();
     const queue = store.data
       ? rankQueue(store.data.assignments, Date.now()).map((e) => e.assignment)
@@ -111,27 +115,30 @@ export async function startTour(): Promise<void> {
     }
 
     // Step 1: select the deliverable to triage.
+    useTourStore.getState().setBeatIndex(0);
     store.select(top.id);
     log(
       untriaged
         ? `SYS // DEMO TOUR: Selecting untriaged deliverable ${top.course_code} "${top.title}"...`
         : "SYS // DEMO TOUR: Every deliverable is planned; selecting the top of the order book...",
     );
-    await pause(1200);
+    await pause(1500);
     if (!live()) return;
 
     // Step 2: run triage; its 4-stage Meta Llama trace streams into the
     // inspector and the new work breakdown lands in the execution deck.
+    useTourStore.getState().setBeatIndex(1);
     log("SYS // DEMO TOUR: Running Meta Llama 4-stage agentic triage...");
     const triaged = useTerminal.getState().triage(top.id);
     await Promise.race([triaged, pause(TRIAGE_WAIT_MS)]);
     // Clears the wait timer when triage finished first.
     cancelPause?.();
     if (!live()) return;
-    await pause(600);
+    await pause(800);
     if (!live()) return;
 
     // Step 3: check off the first open atomic task.
+    useTourStore.getState().setBeatIndex(2);
     const assignment = useTerminal
       .getState()
       .data?.assignments.find((a) => a.id === top.id);
@@ -149,10 +156,11 @@ export async function startTour(): Promise<void> {
         "SYS // DEMO TOUR: No open atomic task on this deliverable; skipping fill.",
       );
     }
-    await pause(1500);
+    await pause(1800);
     if (!live()) return;
 
     // Step 4: project a 95% score through the grade curve.
+    useTourStore.getState().setBeatIndex(3);
     useTerminal.getState().setScenarioScore(top.id, DEMO_SCORE);
     window.dispatchEvent(
       new CustomEvent(WHAT_IF_EVENT, {
@@ -162,7 +170,15 @@ export async function startTour(): Promise<void> {
     log(
       `SYS // DEMO TOUR: Simulating ${DEMO_SCORE}% score -> projected grade curve updated.`,
     );
-    await pause(1500);
+    await pause(1800);
+    if (!live()) return;
+
+    // Step 5: Markowitz Pareto allocation & calendar stream
+    useTourStore.getState().setBeatIndex(4);
+    log(
+      "SYS // DEMO TOUR: Markowitz Pareto Allocator & RFC 5545 calendar stream armed.",
+    );
+    await pause(2500);
     if (!live()) return;
 
     log("SYS // DEMO TOUR: Tour complete. Terminal is fully interactive.");

@@ -44,6 +44,7 @@ interface Staged {
   file: File;
   kind: Exclude<SyllabusFileKind, "text">;
   mimeType: string;
+  previewUrl?: string;
 }
 
 const KIND_TAG: Record<Staged["kind"], string> = {
@@ -168,7 +169,14 @@ function IngestDialog({ onClose }: { onClose: () => void }) {
       setText(await file.text());
       return;
     }
-    setStaged({ file, kind: verdict.kind, mimeType: verdict.mimeType });
+    const previewUrl =
+      verdict.kind === "image" ? URL.createObjectURL(file) : undefined;
+    setStaged({
+      file,
+      kind: verdict.kind,
+      mimeType: verdict.mimeType,
+      previewUrl,
+    });
   };
 
   const onDrag = (event: DragEvent) => {
@@ -283,19 +291,45 @@ function IngestDialog({ onClose }: { onClose: () => void }) {
             onLoad={(preset) => void loadPreset(preset)}
           />
           {staged ? (
-            <div className="flex items-center gap-3 border border-up/40 bg-up/5 px-2.5 py-2 text-[12px]">
-              <span className="shrink-0 border border-up/50 px-1 text-[10px] text-up">
-                {KIND_TAG[staged.kind]}
-              </span>
-              <span className="min-w-0 flex-1 truncate text-ink">
-                {staged.file.name}
-              </span>
-              <span className="shrink-0 text-ink-3 tabular-nums">
-                {formatBytes(staged.file.size)}
-              </span>
-              <Key tone="down" onClick={() => setStaged(null)}>
-                REMOVE
-              </Key>
+            <div className="flex flex-col gap-2 border border-up/40 bg-up/5 p-2.5 text-[12px]">
+              <div className="flex items-center gap-3">
+                <span className="shrink-0 border border-up/50 px-1 text-[10px] text-up">
+                  {KIND_TAG[staged.kind]}
+                </span>
+                <span className="min-w-0 flex-1 truncate font-medium text-ink">
+                  {staged.file.name}
+                </span>
+                <span className="shrink-0 tabular-nums text-ink-3">
+                  {formatBytes(staged.file.size)}
+                </span>
+                <Key
+                  tone="down"
+                  onClick={() => {
+                    if (staged.previewUrl) URL.revokeObjectURL(staged.previewUrl);
+                    setStaged(null);
+                  }}
+                >
+                  REMOVE
+                </Key>
+              </div>
+              {staged.previewUrl && (
+                <div className="flex items-center gap-3 border-t border-line/40 pt-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={staged.previewUrl}
+                    alt="Syllabus Preview"
+                    className="h-16 w-24 rounded border border-line-strong object-cover bg-canvas"
+                  />
+                  <div className="flex flex-col gap-0.5 text-[11px]">
+                    <span className="flex items-center gap-1.5 font-semibold text-accent">
+                      <span>👁️</span> META LLAMA 3.2 VISION TARGET
+                    </span>
+                    <span className="text-[10px] text-ink-3">
+                      Visual grading breakdown & weights will be parsed via multimodal vision tokens.
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <button

@@ -9,6 +9,7 @@ import {
 } from "react-grid-layout";
 import { CommandPalette } from "@/components/CommandPalette";
 import { EquityCurve } from "@/components/EquityCurve";
+import { JudgeTourHUD } from "@/components/JudgeTourHUD";
 import { NextBestAction } from "@/components/NextBestAction";
 import { OrderBook } from "@/components/OrderBook";
 import { TaskTree } from "@/components/TaskTree";
@@ -181,6 +182,13 @@ function useHotkeys() {
         return;
       }
 
+      // Student Mode toggle (U)
+      if (key === "u" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        state.toggleStudentMode();
+        return;
+      }
+
       // Keyboard cheat-sheet / command palette (?)
       if (event.key === "?" && !event.ctrlKey && !event.metaKey) {
         event.preventDefault();
@@ -337,16 +345,16 @@ function Workstation() {
 
   const panels = useMemo(
     () => [
-      <div key="orderbook">
+      <div key="orderbook" data-tour="order-book" className="h-full">
         <OrderBook />
       </div>,
-      <div key="tasktree">
+      <div key="tasktree" data-tour="task-tree" className="h-full">
         <TaskTree />
       </div>,
-      <div key="equity">
+      <div key="equity" data-tour="equity-curve" className="h-full">
         <EquityCurve />
       </div>,
-      <div key="velocity">
+      <div key="velocity" className="h-full">
         <Velocity />
       </div>,
     ],
@@ -368,7 +376,9 @@ function Workstation() {
           <Key onClick={resetLayout}>RESET LAYOUT</Key>
         </span>
       </div>
-      <NextBestAction />
+      <div data-tour="nba">
+        <NextBestAction />
+      </div>
       <main
         ref={containerRef}
         className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto"
@@ -425,6 +435,7 @@ export default function Terminal() {
       <Workstation />
       <StatusBar />
       <TokenModal />
+      <JudgeTourHUD />
     </div>
   );
 }

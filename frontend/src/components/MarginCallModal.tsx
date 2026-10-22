@@ -261,6 +261,7 @@ function MarginCallDialog({ onClose }: { onClose: () => void }) {
   useEscape(onClose);
   const phoneId = useId();
   const hasData = useTerminal((s) => s.data !== null);
+  const studentMode = useTerminal((s) => s.studentMode);
   const [nonce, setNonce] = useState(0);
   const [run, setRun] = useState<{
     nonce: number;
@@ -324,9 +325,18 @@ function MarginCallDialog({ onClose }: { onClose: () => void }) {
           id="margin-call-title"
           className="flex items-center justify-between border-b border-line bg-head px-2.5 py-1 text-[11px] tracking-wider text-accent uppercase"
         >
-          <span>MARGIN CALL // LIQUIDATION DESK</span>
+          <span>
+            {studentMode
+              ? "ACADEMIC INTERVENTION // GRADE FLOOR AUDIT"
+              : "MARGIN CALL // LIQUIDATION DESK"}
+          </span>
           <span className="text-ink-3">ESC</span>
         </h2>
+        {studentMode && (
+          <div className="border-b border-line bg-accent/5 px-3 py-1.5 text-[11px] text-accent">
+            Academic Intervention Mode: Grade floor audit flags course scores falling below targets, sequencing recovery study blocks to protect your GPA.
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-3 py-2">
           {report && (

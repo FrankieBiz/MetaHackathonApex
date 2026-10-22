@@ -267,6 +267,7 @@ function MarketStance({
   volatility: number;
 }) {
   const stance = academicStance(margin, velocity, volatility);
+  const studentMode = useTerminal((s) => s.studentMode);
   const previous = useRef(stance);
   useEffect(() => {
     if (previous.current !== stance && stance !== "BULLISH ACCELERATION")
@@ -275,15 +276,28 @@ function MarketStance({
   }, [stance]);
   const tone = stance === "VOLATILITY ALERT" ? "text-down"
     : stance === "BULLISH ACCELERATION" ? "text-up" : "text-accent";
+  const displayLabel = studentMode
+    ? stance === "VOLATILITY ALERT"
+      ? "GRADE AT RISK"
+      : stance === "BULLISH ACCELERATION"
+        ? "HONORS SPRINT"
+        : "DEFENDING TARGET"
+    : stance;
   return (
     <div
       role="status"
       aria-atomic="true"
       className={`flex shrink-0 items-center gap-2 border-r border-line bg-head px-2 ${tone}`}
-      title="Academic stance: volatility ≥200 triggers an alert; grade margin ≥0 and completion velocity ≥100% signal acceleration; otherwise protect the grade buffer. Updates with grades, task fills, time logs, and deadlines."
+      title={
+        studentMode
+          ? `Student Mode: ${stance} — ${displayLabel}. Volunteer or triage to lift grade buffer.`
+          : "Academic stance: volatility ≥200 triggers an alert; grade margin ≥0 and completion velocity ≥100% signal acceleration; otherwise protect the grade buffer. Updates with grades, task fills, time logs, and deadlines."
+      }
     >
-      <span className="hidden text-ink-3 xl:inline">STANCE</span>
-      <span>{stance}</span>
+      <span className="hidden text-ink-3 xl:inline">
+        {studentMode ? "POSTURE" : "STANCE"}
+      </span>
+      <span>{displayLabel}</span>
     </div>
   );
 }
@@ -463,6 +477,8 @@ export function TopBar() {
   const sync = useTerminal((s) => s.sync);
   const soundOn = useTerminal((s) => s.soundOn);
   const toggleSound = useTerminal((s) => s.toggleSound);
+  const studentMode = useTerminal((s) => s.studentMode);
+  const toggleStudentMode = useTerminal((s) => s.toggleStudentMode);
   const setTokenOpen = useTerminal((s) => s.setTokenOpen);
   const setPaletteOpen = useTerminal((s) => s.setPaletteOpen);
   const setSyllabusOpen = useSyllabusIngest((s) => s.setOpen);
@@ -494,6 +510,14 @@ export function TopBar() {
             aria-label="Start demo tour"
           >
             ▶ TOUR
+          </Key>
+          <Key
+            tone={studentMode ? "accent" : undefined}
+            onClick={() => toggleStudentMode()}
+            title={`Toggle Student Mode: plain-English subtitles vs Wall St density (hotkey U)`}
+            aria-label="Toggle student mode"
+          >
+            {studentMode ? "🎓 STUDENT" : "🏛️ WALL ST"}
           </Key>
           <Key
             onClick={() => toggleSound()}

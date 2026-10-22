@@ -39,6 +39,10 @@ import {
   type Scenario,
 } from "@/lib/engine";
 import {
+  studentModeEnabled,
+  setStudentModeEnabled,
+} from "@/lib/studentMode";
+import {
   playFill,
   playTick,
   soundEnabled,
@@ -183,6 +187,8 @@ interface TerminalStore {
   tokenOpen: boolean;
   soundOn: boolean;
   toggleSound: () => void;
+  studentMode: boolean;
+  toggleStudentMode: () => void;
   /** Writes a line to the status bar log. */
   logEvent: (level: TerminalEvent["level"], text: string) => void;
   scenario: Scenario;
@@ -536,11 +542,24 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
     paletteOpen: false,
     tokenOpen: false,
     soundOn: soundEnabled(),
+    studentMode: studentModeEnabled(),
     scenario: {},
 
     toggleSound: () => {
       const next = toggleFeedbackSound();
       set({ soundOn: next });
+    },
+
+    toggleStudentMode: () => {
+      const next = !get().studentMode;
+      setStudentModeEnabled(next);
+      set({ studentMode: next });
+      log(
+        "info",
+        next
+          ? "SYS // STUDENT MODE: Active (plain-English collegiate subtitles enabled)."
+          : "SYS // WALL ST MODE: Active (financial engineering density active).",
+      );
     },
 
     logEvent: log,
