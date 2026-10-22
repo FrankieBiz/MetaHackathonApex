@@ -37,6 +37,7 @@ import { isRemote, useTerminal } from "@/store/terminal";
 import { Velocity } from "@/components/Velocity";
 import { rankQueue } from "@/lib/engine";
 import { startTour } from "@/lib/tour";
+import { isTourHotkey } from "@/lib/judgeTrust";
 import type { TerminalEvent } from "@/types";
 
 const MARGIN = 6;
@@ -186,6 +187,13 @@ function useHotkeys() {
       if (key === "u" && !event.ctrlKey && !event.metaKey && !event.altKey) {
         event.preventDefault();
         state.toggleStudentMode();
+        return;
+      }
+
+      // 60-second judge tour (D); startTour ignores a second press while it runs
+      if (isTourHotkey(event)) {
+        event.preventDefault();
+        if (!event.repeat) void startTour();
         return;
       }
 

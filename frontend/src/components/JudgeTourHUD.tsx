@@ -4,15 +4,18 @@ import { useEffect } from "react";
 import { Key } from "@/components/ui";
 import { TOUR_BEATS, useTourStore } from "@/store/tourStore";
 import { stopTour } from "@/lib/tour";
+import { TOUR_HUD_TITLE, tourProgress } from "@/lib/judgeTrust";
 
 export function JudgeTourHUD() {
   const running = useTourStore((s) => s.running);
   const beatIndex = useTourStore((s) => s.beatIndex);
   const nextBeat = useTourStore((s) => s.nextBeat);
   const prevBeat = useTourStore((s) => s.prevBeat);
+  const setBeatIndex = useTourStore((s) => s.setBeatIndex);
   const stop = useTourStore((s) => s.stop);
 
   const beat = TOUR_BEATS[beatIndex] ?? TOUR_BEATS[0];
+  const progress = tourProgress(beatIndex, TOUR_BEATS.length);
 
   useEffect(() => {
     if (!running) return;
@@ -45,29 +48,45 @@ export function JudgeTourHUD() {
       aria-label="Judge Demo Tour HUD"
       className="fixed bottom-6 left-1/2 z-50 flex w-[94%] max-w-[780px] -translate-x-1/2 flex-col gap-2 border-2 border-accent bg-head/95 p-3.5 shadow-2xl shadow-black backdrop-blur-md transition-all duration-200"
     >
-      {/* Progress Line */}
-      <div className="flex h-1 w-full gap-1 overflow-hidden bg-line">
-        {TOUR_BEATS.map((b, idx) => (
-          <div
-            key={b.id}
-            className={`h-full flex-1 transition-all duration-300 ${
-              idx <= beatIndex ? "bg-accent" : "bg-line-strong"
-            }`}
-          />
-        ))}
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-[11px] font-bold tracking-wider text-accent uppercase">
+          {TOUR_HUD_TITLE}
+        </h2>
+        <span
+          role="status"
+          className="text-[10px] font-semibold text-ink tabular-nums"
+        >
+          {progress.label}
+        </span>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line pb-2">
-        <div className="flex items-center gap-2">
-          <span className="bg-accent px-1.5 py-0.5 text-[10px] font-bold text-canvas uppercase">
-            {beat.badge}
-          </span>
-          <span className="text-[12px] font-semibold tracking-wider text-ink uppercase">
-            {beat.title}
-          </span>
-        </div>
-        <span className="text-[10px] text-ink-3 tabular-nums">
-          BEAT {beatIndex + 1} OF {TOUR_BEATS.length}
+      {/* Progress line: each segment jumps to that step */}
+      <nav aria-label="Jump to tour step" className="flex w-full gap-1">
+        {TOUR_BEATS.map((b, idx) => (
+          <button
+            key={b.id}
+            type="button"
+            onClick={() => setBeatIndex(idx)}
+            aria-label={`Jump to step ${idx + 1}: ${b.title}`}
+            aria-current={idx === beatIndex ? "step" : undefined}
+            title={`Step ${idx + 1}: ${b.title}`}
+            className="group flex-1 cursor-pointer py-1.5 outline-none"
+          >
+            <span
+              className={`block h-1 w-full transition-colors duration-300 group-hover:bg-accent/70 group-focus-visible:ring-1 group-focus-visible:ring-accent ${
+                idx <= beatIndex ? "bg-accent" : "bg-line-strong"
+              }`}
+            />
+          </button>
+        ))}
+      </nav>
+
+      <div className="flex flex-wrap items-center gap-2 border-b border-line pb-2">
+        <span className="bg-accent px-1.5 py-0.5 text-[10px] font-bold text-canvas uppercase">
+          {beat.badge}
+        </span>
+        <span className="text-[12px] font-semibold tracking-wider text-ink uppercase">
+          {beat.title}
         </span>
       </div>
 

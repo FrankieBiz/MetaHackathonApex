@@ -21,6 +21,7 @@ import {
   formatBytes,
   type SyllabusFileKind,
 } from "@/lib/syllabus";
+import { VISION_INGEST } from "@/lib/judgeTrust";
 import {
   LOCAL_SYLLABUS_PRESETS,
   type SyllabusPreset,
@@ -112,6 +113,34 @@ function SamplePresets({
           </button>
         ))}
       </div>
+    </section>
+  );
+}
+
+/** Names the vision model and the document-handling guarantee above the upload area. */
+function VisionIngestHeader() {
+  return (
+    <section
+      aria-labelledby="syllabus-vision"
+      className="flex flex-col gap-1.5 border border-accent/40 bg-accent/5 px-2.5 py-2"
+    >
+      <h3
+        id="syllabus-vision"
+        className="text-[11px] font-semibold tracking-wider text-accent uppercase"
+      >
+        <span aria-hidden>[</span>
+        {VISION_INGEST.heading}
+        <span aria-hidden>]</span>
+      </h3>
+      <ul className="flex flex-wrap gap-1.5 text-[10px]">
+        <li className="border border-accent/50 px-1.5 py-0.5 text-accent">
+          {VISION_INGEST.modelBadge}
+        </li>
+        <li className="border border-up/50 px-1.5 py-0.5 text-up">
+          <span aria-hidden>🛡️ </span>
+          {VISION_INGEST.privacyBadge}
+        </li>
+      </ul>
     </section>
   );
 }
@@ -290,6 +319,7 @@ function IngestDialog({ onClose }: { onClose: () => void }) {
             loading={loadingPreset?.id ?? null}
             onLoad={(preset) => void loadPreset(preset)}
           />
+          <VisionIngestHeader />
           {staged ? (
             <div className="flex flex-col gap-2 border border-up/40 bg-up/5 p-2.5 text-[12px]">
               <div className="flex items-center gap-3">

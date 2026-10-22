@@ -51,6 +51,7 @@ import { GLOSSARY } from "@/lib/glossary";
 import { breachCount } from "@/lib/marginCall";
 import { isRemote, useTerminal } from "@/store/terminal";
 import { startTour } from "@/lib/tour";
+import { FERPA_BADGE, JUDGE_TOUR_BUTTON } from "@/lib/judgeTrust";
 import { armStartupChime, playAlert } from "@/lib/feedback";
 import { armMorningBell } from "@/lib/morningBell";
 import type { ConnectionMode, Course, DataOrigin } from "@/types";
@@ -219,6 +220,23 @@ function ConnectionBadge() {
       <span aria-hidden>{mode === "connecting" ? "○" : "●"}</span>
       <span>{badge.text}</span>
       {badge.tag && <span className="text-ink-3">· {badge.tag}</span>}
+    </div>
+  );
+}
+
+/** Privacy posture for judges: the tooltip states the isolation model. */
+function FerpaBadge() {
+  return (
+    <div
+      role="note"
+      tabIndex={0}
+      aria-label={`${FERPA_BADGE.label}. ${FERPA_BADGE.tooltip}`}
+      title={FERPA_BADGE.tooltip}
+      className="flex h-[22px] cursor-help items-center border border-up/50 px-1.5 text-[11px] text-up outline-none focus-visible:border-up"
+    >
+      <span aria-hidden>[</span>
+      {FERPA_BADGE.label}
+      <span aria-hidden>]</span>
     </div>
   );
 }
@@ -504,12 +522,19 @@ export function TopBar() {
           <BreakerAlarm />
           <ConnectionBadge />
           <EngineBadge />
+          <FerpaBadge />
           <Key
+            active
+            caps={false}
             onClick={() => void startTour()}
-            title="Start automated judge demonstration tour"
-            aria-label="Start demo tour"
+            title={JUDGE_TOUR_BUTTON.title}
+            aria-label="Start the 60 second judge tour"
+            aria-keyshortcuts={JUDGE_TOUR_BUTTON.hotkey}
           >
-            ▶ TOUR
+            {JUDGE_TOUR_BUTTON.label}
+            <span aria-hidden className="ml-1.5 border border-accent/50 px-1 text-[10px] leading-[14px]">
+              {JUDGE_TOUR_BUTTON.hotkey}
+            </span>
           </Key>
           <Key
             tone={studentMode ? "accent" : undefined}
