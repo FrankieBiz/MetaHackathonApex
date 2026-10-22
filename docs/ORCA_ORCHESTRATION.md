@@ -25,7 +25,7 @@ When delegating heavy lifting to worker models, follow this structured pattern:
 
 ### Step 1: Create or Bind an Orchestration Run
 ```bash
-orca orchestration run-create --name "<feature-or-loop-name>" --json
+orca orchestration run-create --objective "<feature-or-loop-name>" --json
 ```
 
 ### Step 2: Formulate the Task Specification Contract
