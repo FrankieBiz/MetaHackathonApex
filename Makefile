@@ -18,5 +18,11 @@ check: install ## Backend ruff and pytest, then frontend lint, typecheck, tests,
 	$(PY) -m pytest backend -q
 	cd frontend && npm run check
 
+orchestrate-probe: ## Test connectivity and latencies of all mandated frontier model workers
+	$(PY) scripts/orchestrate.py probe
+
+orchestrate-stats: ## Display multi-model token ledger, dispatches, and cost accounting
+	$(PY) scripts/orchestrate.py stats
+
 help: ## List targets
 	@awk 'BEGIN { FS = ":.*## " } /^[a-z]+:.*## / { printf "  make %-8s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
