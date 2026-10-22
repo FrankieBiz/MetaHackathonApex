@@ -16,16 +16,19 @@ Or separately:
 - Frontend: `cd frontend && npm run check`
 
 ## Orchestration Model Rules & Memory
-- **Strict Prohibition on Older Models**: Never orchestrate with older or lower-tier models (e.g. no Claude 3.5, no GPT-4o, no legacy tiers).
+Detailed orchestration specification: [`docs/ORCA_ORCHESTRATION.md`](docs/ORCA_ORCHESTRATION.md)
+
+- **Role of Antigravity**: Antigravity is the Master Orchestrator, not a monolithic heavy lifter. Antigravity plans task specifications, coordinates workers via Orca (`orca orchestration` / `orca agent launch`), enforces test gates (`make check`), and handles release.
+- **Strict Prohibition on Older Models**: Never orchestrate with older or lower-tier models (e.g. no Claude 3.5, no Claude 3.7, no GPT-4o, no legacy tiers).
 - **Mandated Frontier Model Tiers**:
-  1. **OpenAI / Codex**: Use only `gpt-6` or `gpt-6.1` (e.g., `gpt-6.1-sol`, `gpt-6-astra`, high effort).
-  2. **Anthropic / Claude**: Use only the highest available frontier tier (e.g., Claude Opus / Sonnet / Haiku at their absolute latest/highest version, high reasoning).
+  1. **OpenAI / Codex**: Use only `gpt-6` or `gpt-6.1` (e.g., `gpt-6.1-sol`, `gpt-6-astra`, high effort). Heavy lifter for backend, Pydantic v2 schemas, Markowitz convex optimization, Monte Carlo covariance math, and API routes.
+  2. **Anthropic / Claude**: Use only the highest frontier tier (e.g., Claude Sonnet 5.5 / Opus 5.5, high reasoning). Heavy lifter for frontend terminal ergonomics, Next.js 16/React 19 components, multimodal Llama 3.2 vision ingest, and hackathon presentation.
   3. **DeepSeek**: Permitted to utilize `deepseek-v4.1-flash` (or DeepSeek V3/R1 flash via the user's active API credit pool `DEEPSEEK_API_KEY`) for high-throughput extraction, batch rubric parsing, and rapid fuzzing.
 - **Model Role Division**:
   - `gpt-6.1`: Deep backend engineering, Pydantic schemas, Meta Model API integration, strict type safety, algorithm verification.
   - Frontier Claude: Frontend terminal ergonomics, multimodal vision ingest (syllabi & rubrics), UX polish, and hackathon presentation/narrative.
   - `deepseek-v4.1-flash`: Fast extraction, low-latency auditor passes, and test fuzzing.
-  - Antigravity: Multi-worker orchestration, file boundary partitioning, test validation (`make check`), and zero-AI git finishes.
+  - Antigravity: Master orchestrator, task decomposition, file boundary partitioning, test validation (`make check`), and zero-AI git finishes.
 
 ## Mandatory Finish Protocol (Push to Main Production)
 Every single time you finish a task, feature, or fix:

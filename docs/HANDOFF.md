@@ -94,10 +94,11 @@ The user has mandated an exact multi-model orchestration division and strictly p
   ```
 
 ### 3.2 Mandated Model Tiers (Strict Prohibition on Older Tiers)
-- **STRICTLY FORBIDDEN**: Never orchestrate with older or lower-tier models (no Claude 3.5 Sonnet, no GPT-4o, no legacy tiers).
+Detailed Orca orchestration runbook: [`docs/ORCA_ORCHESTRATION.md`](ORCA_ORCHESTRATION.md)
+- **STRICTLY FORBIDDEN**: Never orchestrate with older or lower-tier models (no Claude 3.5, no Claude 3.7, no GPT-4o, no legacy tiers).
 - **OpenAI / Codex Tier**: Use ONLY `gpt-6` or `gpt-6.1` (specifically `gpt-6.1-sol`, `gpt-6-astra`, high effort).
-- **Anthropic / Claude Tier**: Use ONLY the highest frontier tier available (e.g., Claude Opus / highest reasoning tier).
-- **DeepSeek Tier**: Permitted and encouraged to utilize `deepseek-v4.1-flash` (or DeepSeek V3/R1 flash via the user's active $9 API credit pool `DEEPSEEK_API_KEY`) for rapid fuzzing, extraction, and auditor passes.
+- **Anthropic / Claude Tier**: Use ONLY the highest frontier tier available (specifically Claude Sonnet 5.5 / Opus 5.5 with high reasoning).
+- **DeepSeek Tier**: Permitted and encouraged to utilize `deepseek-v4.1-flash` (or DeepSeek V3/R1 flash via the user's active API credit pool `DEEPSEEK_API_KEY`) for rapid fuzzing, extraction, and auditor passes.
 
 ### 3.3 Functional Division of Labor
 - **OpenAI GPT-6.1 (`gpt-6.1-sol`)**:
