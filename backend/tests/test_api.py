@@ -404,6 +404,9 @@ async def test_cors_and_openapi(api, terminal):
         "/api/v1/syllabus/presets",
         "/api/v1/syllabus/presets/{preset_id}/load",
         "/api/v1/ingest/syllabus",
+        "/api/v1/triage/{assignment_id}/council",
+        "/api/v1/defense-council",
+        "/api/v1/portfolio/margin-call",
         "/api/subtasks/{subtask_id}",
     }
     assert paths["/api/subtasks/{subtask_id}"]["patch"]["deprecated"] is True

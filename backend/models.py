@@ -280,6 +280,75 @@ class InferenceTelemetry(StrictModel):
     tokens_per_sec: Annotated[float, Field(ge=0)] | None = 0.0
 
 
+class DefenseCouncilMember(StrictModel):
+    role: Literal["Professor", "Student", "Arbitrator"]
+    position: Annotated[str, Field(min_length=1, max_length=1500, pattern=r"\S")]
+    priorities: Annotated[list[Title], Field(min_length=1, max_length=6)]
+
+
+class DefenseCouncilDeliberation(StrictModel):
+    assignment_id: Identifier
+    members: Annotated[list[DefenseCouncilMember], Field(min_length=3, max_length=3)]
+    verdict: Annotated[str, Field(min_length=1, max_length=1500, pattern=r"\S")]
+    subtasks: list[SubTaskNode]
+    source: Literal["ai", "local"]
+    telemetry: InferenceTelemetry
+
+    @model_validator(mode="after")
+    def ordered_roles(self) -> "DefenseCouncilDeliberation":
+        if [member.role for member in self.members] != ["Professor", "Student", "Arbitrator"]:
+            raise ValueError("Council requires Professor, Student, and Arbitrator in order")
+        return self
+
+
+class CongestionCluster(StrictModel):
+    id: Identifier
+    start_at: AwareDatetime
+    end_at: AwareDatetime
+    course_ids: Annotated[list[Identifier], Field(min_length=2)]
+    assignment_ids: Annotated[list[Identifier], Field(min_length=2)]
+    congestion_score: Annotated[float, Field(ge=0, le=1)]
+    # Multiplier of variance, so simulated standard deviation uses its square root.
+    variance_inflation: Annotated[float, Field(ge=1, le=2)]
+
+
+class MarginCallCourse(StrictModel):
+    course_id: Identifier
+    course_code: Title
+    current_score: Annotated[float, Field(ge=0)]
+    target_score: Annotated[float, Field(ge=0, le=100)]
+    deficit: Annotated[float, Field(ge=0)]
+
+
+class MarginRestorationAction(StrictModel):
+    assignment_id: Identifier
+    course_id: Identifier
+    title: Title
+    due_at: AwareDatetime | None
+    marginal_impact: Annotated[float, Field(ge=0, le=1)]
+    required_score: Annotated[float, Field(ge=0)] | None
+
+
+class MarginCallWebhookPayload(StrictModel):
+    """Ready to hand to a messaging adapter; this does not dispatch a message."""
+
+    messaging_product: Literal["whatsapp"] = "whatsapp"
+    type: Literal["text"] = "text"
+    text: dict[Literal["body"], str]
+
+
+class MarginCallReport(StrictModel):
+    triggered: bool
+    academic_stance: Literal[
+        "MAXIMAL_AGGRESSION", "ACTIVE_PROTECTION", "MAINTAIN_FLOOR", "CRITICAL_INTERVENTION"
+    ]
+    # Mean shortfall below target, in course percentage points; unknown grades excluded.
+    liquidation_deficit: Annotated[float, Field(ge=0)]
+    breached_courses: list[MarginCallCourse]
+    restoration_order: list[MarginRestorationAction]
+    webhook_payload: MarginCallWebhookPayload | None
+
+
 class DecomposeRequest(StrictModel):
     assignment_id: Identifier
 

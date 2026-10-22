@@ -4,7 +4,8 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from math import sqrt
 from random import Random
 from statistics import fmean, pstdev, quantiles
 from time import perf_counter
@@ -17,7 +18,9 @@ from pydantic import AliasChoices, Field, computed_field
 from .ai_engine import (
     extract_syllabus,
     fallback_tree,
+    generate_defense_council,
     generate_study_recommendation,
+    grade_floor,
     run_triage_agent,
     saved_plan_trace,
     stream_triage,
@@ -29,10 +32,16 @@ from .config import Settings
 from .models import (
     AgentReasoningStep,
     AssignmentModel,
+    CongestionCluster,
     CourseModel,
     DecomposeResponse,
+    DefenseCouncilDeliberation,
     Identifier,
     InferenceTelemetry,
+    MarginCallCourse,
+    MarginCallReport,
+    MarginCallWebhookPayload,
+    MarginRestorationAction,
     StrictModel,
     StudyInsertRequest,
     SubTaskNode,
@@ -156,6 +165,62 @@ class CourseSimulation(StrictModel):
 class MonteCarloResponse(StrictModel):
     iterations: int
     courses: list[CourseSimulation]
+    congestion_matrix: list[CongestionCluster] = Field(default_factory=list)
+
+
+def detect_deadline_congestion(
+    assignments: list[AssignmentModel], *, now: datetime | None = None
+) -> list[CongestionCluster]:
+    """Maximal cross-course windows, inclusive of 72 hours; settled work is excluded.
+
+    The transparent heuristic adds 0.25 pressure per competing deliverable, capped at
+    1.0. Variance increases by that fraction; this is a workload scenario, not an
+    empirically fitted statistical covariance estimate.
+    """
+    now = now or datetime.now(UTC)
+    pending = sorted(
+        (
+            a
+            for a in assignments
+            if not a.graded and a.status != "completed" and a.due_at is not None and a.due_at >= now
+        ),
+        key=lambda a: (a.due_at, a.id),
+    )
+    clusters = []
+    right = last_end = 0
+    for left, first in enumerate(pending):
+        while right < len(pending) and pending[right].due_at - first.due_at <= timedelta(hours=72):
+            right += 1
+        if right == last_end:
+            continue  # This window is a subset of the preceding maximal one.
+        window = pending[left:right]
+        course_ids = sorted({a.course_id for a in window})
+        if len(course_ids) < 2:
+            continue
+        last_end = right
+        ids = sorted(a.id for a in window)
+        score = min(1.0, (len(window) - 1) / 4)
+        clusters.append(
+            CongestionCluster(
+                id=str(uuid5(NAMESPACE_URL, "apex:congestion:" + json.dumps(ids))),
+                start_at=first.due_at,
+                end_at=window[-1].due_at,
+                course_ids=course_ids,
+                assignment_ids=ids,
+                congestion_score=score,
+                variance_inflation=1 + score,
+            )
+        )
+    return clusters
+
+
+def _congestion_factors(clusters: list[CongestionCluster]) -> dict[str, float]:
+    factors: dict[str, float] = {}
+    for cluster in clusters:
+        for identifier in cluster.assignment_ids:
+            # Overlapping windows describe the same workload; do not compound them.
+            factors[identifier] = max(factors.get(identifier, 1.0), cluster.variance_inflation)
+    return factors
 
 
 def _simulate_course(
@@ -164,6 +229,7 @@ def _simulate_course(
     request: MonteCarloRequest,
     *,
     path_samples: list[float] | None = None,
+    variance_inflation: dict[str, float] | None = None,
 ) -> CourseSimulation:
     remaining = sorted(
         (a for a in assignments if not a.graded and a.weight > 0), key=lambda a: a.id
@@ -212,7 +278,16 @@ def _simulate_course(
             score = (
                 override
                 if override is not None
-                else min(100.0, max(0.0, rng.gauss(current, spread)))
+                else min(
+                    100.0,
+                    max(
+                        0.0,
+                        rng.gauss(
+                            current,
+                            spread * sqrt((variance_inflation or {}).get(assignment.id, 1.0)),
+                        ),
+                    ),
+                )
             )
             paths[index] += row.marginal_impact * score
     if path_samples is not None:
@@ -255,6 +330,7 @@ def _grade_points(score: float) -> float:
 
 def _portfolio_report(state: TerminalState) -> PortfolioReportResponse:
     request = MonteCarloRequest()
+    factors = _congestion_factors(detect_deadline_congestion(state.assignments))
     courses = []
     actions = []
     samples = []
@@ -262,7 +338,9 @@ def _portfolio_report(state: TerminalState) -> PortfolioReportResponse:
     for course in state.courses:
         own = [a for a in state.assignments if a.course_id == course.id]
         paths: list[float] = []
-        forecast = _simulate_course(course, own, request, path_samples=paths)
+        forecast = _simulate_course(
+            course, own, request, path_samples=paths, variance_inflation=factors
+        )
         if paths:
             samples.append(paths)
             projected.append(_grade_points(forecast.percentiles.p50))
@@ -339,6 +417,99 @@ def _portfolio_report(state: TerminalState) -> PortfolioReportResponse:
             completion_tokens=None,
             tokens_per_sec=None,
         ),
+    )
+
+
+def generate_margin_call(state: TerminalState) -> MarginCallReport:
+    """Derive an intervention and an unsent messaging payload from a snapshot."""
+    portfolio = _portfolio_report(state)
+    deficit = max(0.0, -portfolio.margin)
+    triggered = portfolio.academic_stance == "CRITICAL_INTERVENTION" or deficit > 5
+    breaches = [
+        MarginCallCourse(
+            course_id=c.course_id,
+            course_code=c.course_code,
+            current_score=c.current_score,
+            target_score=c.target_score,
+            deficit=max(0.0, c.target_score - c.current_score),
+        )
+        for c in portfolio.course_breakdown
+        if c.current_score is not None
+        and (c.current_score < c.target_score or c.status == "AT_RISK")
+    ]
+    breaches.sort(key=lambda c: (-c.deficit, c.course_id))
+    by_course = {c.course_id: c for c in breaches}
+    totals = {
+        c.course_id: max(
+            100.0,
+            sum(a.weight for a in state.assignments if a.course_id == c.course_id and not a.graded),
+        )
+        for c in breaches
+    }
+    actions = []
+    for assignment in state.assignments:
+        course = by_course.get(assignment.course_id)
+        if (
+            course is None
+            or assignment.graded
+            or assignment.status == "completed"
+            or assignment.weight <= 0
+        ):
+            continue
+        impact = assignment.weight / totals[course.course_id]
+        required = grade_floor(impact * 100, course.current_score, course.target_score)
+        actions.append(
+            MarginRestorationAction(
+                assignment_id=assignment.id,
+                course_id=assignment.course_id,
+                title=assignment.title,
+                due_at=assignment.due_at,
+                marginal_impact=impact,
+                required_score=None if required is None else max(0.0, required),
+            )
+        )
+    actions.sort(
+        key=lambda a: (
+            -by_course[a.course_id].deficit,
+            -a.marginal_impact,
+            a.due_at or datetime.max.replace(tzinfo=UTC),
+            a.assignment_id,
+        )
+    )
+    payload = None
+    if triggered:
+        message = [
+            "ACADEMIC MARGIN CALL",
+            (
+                f"Stance: {portfolio.academic_stance}; "
+                f"portfolio deficit: {deficit:.2f} percentage points."
+            ),
+            *[
+                f"{c.course_code}: {c.current_score:g}% / target {c.target_score:g}%"
+                for c in breaches
+            ],
+        ]
+        if actions:
+            first = actions[0]
+            message.append(f"Restore first: {first.title}.")
+            if first.required_score is not None and first.required_score > 100:
+                message.append(
+                    "This assignment alone cannot restore the target; "
+                    "review other recovery options."
+                )
+        else:
+            message.append(
+                "No open weighted work can restore the target; "
+                "review recovery options with the instructor."
+            )
+        payload = MarginCallWebhookPayload(text={"body": "\n".join(message)[:4096]})
+    return MarginCallReport(
+        triggered=triggered,
+        academic_stance=portfolio.academic_stance,
+        liquidation_deficit=deficit,
+        breached_courses=breaches,
+        restoration_order=actions if triggered else [],
+        webhook_payload=payload,
     )
 
 
@@ -421,6 +592,8 @@ class TerminalService:
         }
         if request.shock_overrides.keys() - eligible:
             raise ValueError("Shock overrides must reference remaining weighted assignments")
+        clusters = detect_deadline_congestion(state.assignments)
+        factors = _congestion_factors(clusters)
 
         def simulate() -> MonteCarloResponse:
             return MonteCarloResponse(
@@ -430,13 +603,30 @@ class TerminalService:
                         course,
                         [a for a in state.assignments if a.course_id == course.id],
                         request,
+                        variance_inflation=factors,
                     )
                     for course in courses
                 ],
+                congestion_matrix=[c for c in clusters if selected.intersection(c.course_ids)],
             )
 
         # CPU work uses a snapshot outside the state lock and off the async request loop.
         return await asyncio.to_thread(simulate)
+
+    async def defense_council(self, assignment_id: str) -> DefenseCouncilDeliberation:
+        snapshot = await self.state()
+        assignment = next((a for a in snapshot.assignments if a.id == assignment_id), None)
+        if assignment is None:
+            raise KeyError(assignment_id)
+        return await generate_defense_council(
+            assignment,
+            triage_context(snapshot, assignment, datetime.now(UTC)),
+            settings=self.settings,
+            client=self.llm,
+        )
+
+    async def margin_call(self) -> MarginCallReport:
+        return await asyncio.to_thread(generate_margin_call, await self.state())
 
     async def portfolio_report(self) -> PortfolioReportResponse:
         report = await asyncio.to_thread(_portfolio_report, await self.state())

@@ -18,7 +18,9 @@ from .models import (
     AgentReasoningStep,
     DecomposeRequest,
     DecomposeResponse,
+    DefenseCouncilDeliberation,
     InferenceTelemetry,
+    MarginCallReport,
     StrictModel,
     StudyInsertRequest,
     StudyTriagePlan,
@@ -221,6 +223,20 @@ def create_app(
         request: Request, body: PortfolioReportRequest | None = None
     ) -> PortfolioReportResponse:
         return await request.app.state.terminal.portfolio_report()
+
+    @app.post("/api/v1/triage/{assignment_id}/council", response_model=DefenseCouncilDeliberation)
+    async def defense_council(assignment_id: str, request: Request) -> DefenseCouncilDeliberation:
+        return await request.app.state.terminal.defense_council(assignment_id)
+
+    @app.post("/api/v1/defense-council", response_model=DefenseCouncilDeliberation)
+    async def defense_council_by_id(
+        body: DecomposeRequest, request: Request
+    ) -> DefenseCouncilDeliberation:
+        return await request.app.state.terminal.defense_council(body.assignment_id)
+
+    @app.post("/api/v1/portfolio/margin-call", response_model=MarginCallReport)
+    async def margin_call(request: Request) -> MarginCallReport:
+        return await request.app.state.terminal.margin_call()
 
     @app.get("/api/v1/syllabus/presets", response_model=list[SyllabusPresetDescriptor])
     async def syllabus_presets() -> list[SyllabusPresetDescriptor]:
