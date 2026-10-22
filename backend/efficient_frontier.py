@@ -54,6 +54,8 @@ def _course_remaining_weight(course_id: str, state: TerminalState) -> float:
 
 def _score_delta(minutes: float, base_score: float, rem_weight: float, urgency: float) -> float:
     """Diminishing returns production function for study minutes."""
+    # Delta(m) = max(0, 100 - s) * (1 - exp(-u*m/tau)), tau = max(180, 900*r).
+    # For m >= 0 and u > 0, Delta'(m) >= 0 and Delta''(m) <= 0 before rounding.
     capacity = max(0.0, 100.0 - base_score)
     tau = max(180.0, rem_weight * 900.0)
     exponent = -(urgency * minutes) / tau
@@ -67,6 +69,11 @@ def _optimize_allocation(
     strategy: str,
 ) -> list[FrontierCourseAllocation]:
     """Solve the constrained study allocation problem via discrete marginal gradient steps."""
+    # Greedily approximate max sum_i(c_i * GPA(s_i + Delta_i(m_i))) / sum_i(c_i)
+    # with m_i >= 0 and sum_i(m_i) = total_minutes, using 15-minute increments.
+    # The stepwise GPA map makes this objective nonconcave despite concave Delta_i;
+    # these are heuristic allocations, without a global Pareto-optimality guarantee.
+    # No covariance matrix, matrix inverse, or SLSQP solver is used in this allocator.
     if not courses:
         return []
 
@@ -235,6 +242,11 @@ def calculate_efficient_frontier(
     gpa_delta = round(proj_portfolio_gpa - curr_portfolio_gpa, 2)
 
     # Calculate portfolio volatility
+    # Academic risk proxy: population standard deviation of projected course scores
+    # divided by 100, rather than time-series portfolio risk sqrt(w^T * Sigma * w).
+    # Sharpe-style proxy = (projected GPA - 2.0) / max(0.01, score dispersion).
+    # GPA and normalized score dispersion have different units; this is not a
+    # financial Sharpe estimate. The 0.01 floor bounds the zero-dispersion case.
     scores = [a.projected_score for a in optimal_allocations]
     volatility = round(pstdev(scores) / 100.0, 3) if len(scores) > 1 else 0.05
     sharpe = round((proj_portfolio_gpa - 2.0) / max(0.01, volatility), 2)

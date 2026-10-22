@@ -476,23 +476,23 @@ class FrontierCourseAllocation(StrictModel):
     course_id: Identifier
     course_code: Title
     course_name: Title
-    current_score: float
-    target_score: float
-    credit_hours: float = 3.0
-    allocated_minutes: int
-    allocated_hours: float
-    projected_score: float
-    score_delta: float
-    marginal_gpa_yield: float
-    efficiency_rank: int
+    current_score: Annotated[float, Field(ge=0)]
+    target_score: Annotated[float, Field(ge=0, le=100)]
+    credit_hours: Annotated[float, Field(gt=0)] = 3.0
+    allocated_minutes: Minutes
+    allocated_hours: Annotated[float, Field(ge=0)]
+    projected_score: Annotated[float, Field(ge=0, le=100)]
+    score_delta: Annotated[float, Field(ge=0, le=100)]
+    marginal_gpa_yield: Annotated[float, Field(ge=0)]
+    efficiency_rank: Annotated[int, Field(ge=1)]
     status: Literal["healthy", "drawdown", "critical"]
 
 
 class FrontierPoint(StrictModel):
-    total_hours: float
-    portfolio_gpa: float
-    portfolio_score: float
-    portfolio_volatility: float
+    total_hours: Annotated[float, Field(ge=0)]
+    portfolio_gpa: Annotated[float, Field(ge=0, le=4)]
+    portfolio_score: Annotated[float, Field(ge=0, le=100)]
+    portfolio_volatility: Annotated[float, Field(ge=0)]
     sharpe_ratio: float
     course_allocations: list[FrontierCourseAllocation]
 
@@ -503,12 +503,12 @@ class EfficientFrontierRequest(StrictModel):
 
 
 class EfficientFrontierResponse(StrictModel):
-    weekly_hours: float
+    weekly_hours: Annotated[float, Field(ge=1, le=80)]
     strategy: Literal["magna_cum_laude", "balanced", "drawdown_defense"]
-    current_portfolio_gpa: float
-    projected_portfolio_gpa: float
-    gpa_delta: float
-    portfolio_volatility: float
+    current_portfolio_gpa: Annotated[float, Field(ge=0, le=4)]
+    projected_portfolio_gpa: Annotated[float, Field(ge=0, le=4)]
+    gpa_delta: Annotated[float, Field(ge=-4, le=4)]
+    portfolio_volatility: Annotated[float, Field(ge=0)]
     sharpe_ratio: float
     frontier_curve: list[FrontierPoint]
     optimal_allocation: list[FrontierCourseAllocation]

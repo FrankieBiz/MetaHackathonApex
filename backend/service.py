@@ -13,7 +13,7 @@ from typing import Annotated, Literal
 from uuid import NAMESPACE_URL, uuid5
 
 from openai import APIError, AsyncOpenAI
-from pydantic import AliasChoices, Field, computed_field
+from pydantic import AliasChoices, Field, computed_field, model_validator
 
 from .ai_engine import (
     extract_syllabus,
@@ -145,33 +145,39 @@ class MonteCarloRequest(StrictModel):
 
 
 class ScorePercentiles(StrictModel):
-    p10: float
-    p25: float
-    p50: float
-    p75: float
-    p90: float
+    p10: Annotated[float, Field(ge=0, le=100)]
+    p25: Annotated[float, Field(ge=0, le=100)]
+    p50: Annotated[float, Field(ge=0, le=100)]
+    p75: Annotated[float, Field(ge=0, le=100)]
+    p90: Annotated[float, Field(ge=0, le=100)]
+
+    @model_validator(mode="after")
+    def validate_order(self) -> "ScorePercentiles":
+        if not self.p10 <= self.p25 <= self.p50 <= self.p75 <= self.p90:
+            raise ValueError("Score percentiles must be nondecreasing")
+        return self
 
 
 class AssignmentSensitivity(StrictModel):
-    assignment_id: str
-    weight: float
+    assignment_id: Identifier
+    weight: Annotated[float, Field(gt=0, le=100)]
     # Final course percentage points gained per assignment percentage point.
-    marginal_impact: float
+    marginal_impact: Annotated[float, Field(ge=0, le=1)]
 
 
 class CourseSimulation(StrictModel):
-    course_id: str
-    target_score: float
+    course_id: Identifier
+    target_score: Annotated[float, Field(ge=0, le=100)]
     percentiles: ScorePercentiles | None
     # 90% downside VaR: max(0, mean simulated score - p10), in percentage points.
-    var_90: float | None
+    var_90: Annotated[float, Field(ge=0, le=100)] | None
     # A probability in [0, 1]; unavailable without any grade observations.
-    probability_of_target: float | None
+    probability_of_target: Annotated[float, Field(ge=0, le=1)] | None
     sensitivity_matrix: list[AssignmentSensitivity]
 
 
 class MonteCarloResponse(StrictModel):
-    iterations: int
+    iterations: Annotated[int, Field(ge=100, le=10_000)]
     courses: list[CourseSimulation]
     congestion_matrix: list[CongestionCluster] = Field(default_factory=list)
 
@@ -239,6 +245,16 @@ def _simulate_course(
     path_samples: list[float] | None = None,
     variance_inflation: dict[str, float] | None = None,
 ) -> CourseSimulation:
+    """Sample independent assignment scores and aggregate their course weights.
+
+    With W = max(100, sum(w_i)), a_i = w_i / W, and c the current score,
+    each path is Y = (1 - sum(a_i)) * c + sum(a_i * X_i). Each unshocked
+    X_i is a Gaussian draw clipped to [0, 100], with pre-clipping variance
+    sigma^2 * f_i, where f_i is deadline congestion's variance multiplier.
+    Under independence, Var(Y) = sum(a_i^2 * Var(X_i)); there is no fitted
+    covariance matrix or Cholesky factorization requiring a diagonal ridge.
+    A zero historical sigma deliberately preserves deterministic paths.
+    """
     remaining = sorted(
         (a for a in assignments if not a.graded and a.weight > 0), key=lambda a: a.id
     )
@@ -260,21 +276,20 @@ def _simulate_course(
     current = course.current_score
     if current is None and (history or posted):
         current = fmean(history or posted)
-    result = CourseSimulation(
-        course_id=course.id,
-        target_score=course.target_score,
-        percentiles=None,
-        var_90=None,
-        probability_of_target=None,
-        sensitivity_matrix=sensitivity,
-    )
     # A brand-new course has no defensible baseline; do not invent an earned grade.
     # Fully specified shocks can still determine a course whose entire weight is open.
     fully_specified = sum(a.weight for a in remaining) >= 100 and all(
         a.id in request.shock_overrides for a in remaining
     )
     if current is None and not fully_specified:
-        return result
+        return CourseSimulation(
+            course_id=course.id,
+            target_score=course.target_score,
+            percentiles=None,
+            var_90=None,
+            probability_of_target=None,
+            sensitivity_matrix=sensitivity,
+        )
     current = min(100.0, max(0.0, current if current is not None else 0.0))
     spread = pstdev(observations) if len(observations) >= 2 else 10.0
     paths = [current * (1 - sum(a.weight for a in remaining) / total_weight)] * request.iterations
@@ -298,22 +313,30 @@ def _simulate_course(
                 )
             )
             paths[index] += row.marginal_impact * score
+    # A convex combination stays in [0, 100]; remove floating-point boundary drift.
+    paths = [min(100.0, max(0.0, score)) for score in paths]
     if path_samples is not None:
         path_samples.extend(paths)
     paths.sort()
 
     def percentile(q: float) -> float:
+        # Empirical quantile: interpolate the sorted paths at h = (N - 1) * q.
         position = (len(paths) - 1) * q
         low = int(position)
         high = min(low + 1, len(paths) - 1)
         return paths[low] + (paths[high] - paths[low]) * (position - low)
 
-    result.percentiles = ScorePercentiles(
-        **{f"p{p}": percentile(p / 100) for p in (10, 25, 50, 75, 90)}
+    percentiles = ScorePercentiles(**{f"p{p}": percentile(p / 100) for p in (10, 25, 50, 75, 90)})
+    # For loss L = mean(Y) - Y, the 90% downside VaR is max(0, mean(Y) - Q_0.10(Y)).
+    # Construct the complete result once so every computed field is validated.
+    return CourseSimulation(
+        course_id=course.id,
+        target_score=course.target_score,
+        percentiles=percentiles,
+        var_90=max(0.0, fmean(paths) - percentiles.p10),
+        probability_of_target=sum(score >= course.target_score for score in paths) / len(paths),
+        sensitivity_matrix=sensitivity,
     )
-    result.var_90 = max(0.0, fmean(paths) - result.percentiles.p10)
-    result.probability_of_target = sum(score >= course.target_score for score in paths) / len(paths)
-    return result
 
 
 def _grade_points(score: float) -> float:
