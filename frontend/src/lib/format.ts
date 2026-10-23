@@ -1,9 +1,18 @@
 const MINUS = "−";
 
+const DASH = "—";
+
 const pad = (value: number) => String(value).padStart(2, "0");
 
+const isMeasurable = (value: number | null | undefined): value is number =>
+  typeof value === "number" && Number.isFinite(value);
+
 /** 2D 06:12:33 · 06:12:33 · −03:12:10 */
-export function countdown(ms: number): string {
+export function countdown(
+  ms: number | null | undefined,
+  fallback = DASH,
+): string {
+  if (!isMeasurable(ms)) return fallback;
   const sign = ms < 0 ? MINUS : "";
   let seconds = Math.floor(Math.abs(ms) / 1000);
   const days = Math.floor(seconds / 86_400);
@@ -13,25 +22,40 @@ export function countdown(ms: number): string {
 }
 
 /** 45m · 1h 05m */
-export function minutes(total: number): string {
+export function minutes(
+  total: number | null | undefined,
+  fallback = DASH,
+): string {
+  if (!isMeasurable(total)) return fallback;
   const rounded = Math.round(total);
   if (Math.abs(rounded) < 60) return `${rounded}m`;
   const hours = Math.trunc(rounded / 60);
   return `${hours}h ${pad(Math.abs(rounded % 60))}m`;
 }
 
-export const pct = (value: number, digits = 1) => `${value.toFixed(digits)}%`;
+export const pct = (
+  value: number | null | undefined,
+  digits = 1,
+  fallback = DASH,
+) => (isMeasurable(value) ? `${value.toFixed(digits)}%` : fallback);
 
 /** +4.2 · −2.4 with a true minus sign. */
-export function signed(value: number, digits = 1): string {
+export function signed(
+  value: number | null | undefined,
+  digits = 1,
+  fallback = DASH,
+): string {
+  if (!isMeasurable(value)) return fallback;
   const fixed = Math.abs(value).toFixed(digits);
   if (Number(fixed) === 0) return `±${fixed}`;
   return `${value > 0 ? "+" : MINUS}${fixed}`;
 }
 
 /** Scores span 0.01 to several thousand; keep about three significant digits. */
-export const score = (value: number) =>
-  value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2);
+export const score = (value: number | null | undefined, fallback = DASH) =>
+  isMeasurable(value)
+    ? value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2)
+    : fallback;
 
 export function clock(date: Date, timeZone?: string): string {
   return new Intl.DateTimeFormat("en-GB", {

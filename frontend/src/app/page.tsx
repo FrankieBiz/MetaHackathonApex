@@ -12,6 +12,7 @@ import { EquityCurve } from "@/components/EquityCurve";
 import { JudgeTourHUD } from "@/components/JudgeTourHUD";
 import { NextBestAction } from "@/components/NextBestAction";
 import { OrderBook } from "@/components/OrderBook";
+import { PanelErrorBoundary } from "@/components/PanelErrorBoundary";
 import { TaskTree } from "@/components/TaskTree";
 import { TokenModal } from "@/components/TokenModal";
 import { TopBar } from "@/components/TopBar";
@@ -354,13 +355,19 @@ function Workstation() {
   const panels = useMemo(
     () => [
       <div key="orderbook" data-tour="order-book" className="h-full">
-        <OrderBook />
+        <PanelErrorBoundary label="ORDER BOOK">
+          <OrderBook />
+        </PanelErrorBoundary>
       </div>,
       <div key="tasktree" data-tour="task-tree" className="h-full">
-        <TaskTree />
+        <PanelErrorBoundary label="TASK TREE">
+          <TaskTree />
+        </PanelErrorBoundary>
       </div>,
       <div key="equity" data-tour="equity-curve" className="h-full">
-        <EquityCurve />
+        <PanelErrorBoundary label="EQUITY CURVE">
+          <EquityCurve />
+        </PanelErrorBoundary>
       </div>,
       <div key="velocity" className="h-full">
         <Velocity />
@@ -385,7 +392,9 @@ function Workstation() {
         </span>
       </div>
       <div data-tour="nba">
-        <NextBestAction />
+        <PanelErrorBoundary label="NEXT BEST ACTION">
+          <NextBestAction />
+        </PanelErrorBoundary>
       </div>
       <main
         ref={containerRef}
