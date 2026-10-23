@@ -144,10 +144,10 @@ describe("Judge tour HUD navigation", () => {
   it("jumps straight to any step while the tour runs", () => {
     const store = useTourStore.getState();
     store.setRunning(true);
-    store.setBeatIndex(3);
-    expect(useTourStore.getState().beatIndex).toBe(3);
+    store.setBeatIndex(1);
+    expect(useTourStore.getState().beatIndex).toBe(1);
     expect(tourProgress(useTourStore.getState().beatIndex, TOUR_BEATS.length).label).toBe(
-      "STEP 4 OF 5",
+      "STEP 2 OF 3",
     );
   });
 

@@ -5,9 +5,9 @@
 // back to the user.
 
 import { useTerminal } from "@/store/terminal";
-import { isUntriaged, leaves, rankQueue } from "@/lib/engine";
-import { playFill } from "@/lib/feedback";
+import { rankQueue } from "@/lib/engine";
 import { useTourStore } from "@/store/tourStore";
+import { sampleSyllabusState } from "@/lib/sampleSyllabus";
 
 /**
  * The what-if simulator keeps its scores in local state, so the tour announces
@@ -16,8 +16,6 @@ import { useTourStore } from "@/store/tourStore";
 export const WHAT_IF_EVENT = "apex:what-if";
 
 const DEMO_SCORE = 95;
-/** Longest the tour waits on a triage before moving on; a live model call can run long. */
-const TRIAGE_WAIT_MS = 9000;
 
 let running = false;
 let runToken = 0;
@@ -99,86 +97,46 @@ export async function startTour(): Promise<void> {
   }, 0);
 
   try {
-    useTourStore.getState().setRunning(true);
-    useTourStore.getState().setBeatIndex(0);
+    const tourStore = useTourStore.getState();
     const store = useTerminal.getState();
+    tourStore.setRunning(true);
+
+    // Ensure sample data is present if empty
+    if (!store.data) {
+      store.loadSampleSyllabus(sampleSyllabusState(Date.now()));
+    }
+
+    // Beat 1: LaunchPad & Multimodal Syllabus Ingest
+    tourStore.setBeatIndex(0);
+    store.setWorkstationOpen(false);
+    log("SYS // DEMO TOUR: Beat 1 — Syllabus deconstruction & local sandbox isolation.");
+    await pause(2500);
+    if (!live()) return;
+
+    // Beat 2: 45-Minute Focus Action & Calendar Block
+    tourStore.setBeatIndex(1);
+    log("SYS // DEMO TOUR: Beat 2 — 45-minute focus block with break-even guarantees & RFC 5545 calendar export.");
+    await pause(2500);
+    if (!live()) return;
+
+    // Beat 3: Under The Hood Reveal — Bloomberg Quantitative Workstation
+    tourStore.setBeatIndex(2);
+    store.setWorkstationOpen(true);
     const queue = store.data
       ? rankQueue(store.data.assignments, Date.now()).map((e) => e.assignment)
       : [];
-    // Triage on a plan with logged work keeps the saved plan (CACHED-PLAN), so
-    // the tour prefers the highest-priority deliverable that has no plan yet.
-    const untriaged = queue.find(isUntriaged);
-    const top = untriaged ?? queue[0];
-    if (!top) {
-      log("SYS // DEMO TOUR: No active deliverable to demonstrate.");
-      return;
-    }
-
-    // Step 1: select the deliverable to triage.
-    useTourStore.getState().setBeatIndex(0);
-    store.select(top.id);
-    log(
-      untriaged
-        ? `SYS // DEMO TOUR: Selecting untriaged deliverable ${top.course_code} "${top.title}"...`
-        : "SYS // DEMO TOUR: Every deliverable is planned; selecting the top of the order book...",
-    );
-    await pause(1500);
-    if (!live()) return;
-
-    // Step 2: run triage; its 4-stage Meta Llama trace streams into the
-    // inspector and the new work breakdown lands in the execution deck.
-    useTourStore.getState().setBeatIndex(1);
-    log("SYS // DEMO TOUR: Running Meta Llama 4-stage agentic triage...");
-    const triaged = useTerminal.getState().triage(top.id);
-    await Promise.race([triaged, pause(TRIAGE_WAIT_MS)]);
-    // Clears the wait timer when triage finished first.
-    cancelPause?.();
-    if (!live()) return;
-    await pause(800);
-    if (!live()) return;
-
-    // Step 3: check off the first open atomic task.
-    useTourStore.getState().setBeatIndex(2);
-    const assignment = useTerminal
-      .getState()
-      .data?.assignments.find((a) => a.id === top.id);
-    const leaf = assignment
-      ? leaves(assignment.subtasks).find((node) => !node.is_completed)
-      : undefined;
-    if (leaf) {
-      useTerminal.getState().toggle(top.id, leaf.id, true);
-      playFill();
-      log(
-        "SYS // DEMO TOUR: Executed atomic task fill -> live velocity & margin recomputation!",
-      );
-    } else {
-      log(
-        "SYS // DEMO TOUR: No open atomic task on this deliverable; skipping fill.",
+    const top = queue[0];
+    if (top) {
+      store.select(top.id);
+      store.setScenarioScore(top.id, DEMO_SCORE);
+      window.dispatchEvent(
+        new CustomEvent(WHAT_IF_EVENT, {
+          detail: { assignmentId: top.id, score: DEMO_SCORE },
+        }),
       );
     }
-    await pause(1800);
-    if (!live()) return;
-
-    // Step 4: project a 95% score through the grade curve.
-    useTourStore.getState().setBeatIndex(3);
-    useTerminal.getState().setScenarioScore(top.id, DEMO_SCORE);
-    window.dispatchEvent(
-      new CustomEvent(WHAT_IF_EVENT, {
-        detail: { assignmentId: top.id, score: DEMO_SCORE },
-      }),
-    );
-    log(
-      `SYS // DEMO TOUR: Simulating ${DEMO_SCORE}% score -> projected grade curve updated.`,
-    );
-    await pause(1800);
-    if (!live()) return;
-
-    // Step 5: Markowitz Pareto allocation & calendar stream
-    useTourStore.getState().setBeatIndex(4);
-    log(
-      "SYS // DEMO TOUR: Markowitz Pareto Allocator & RFC 5545 calendar stream armed.",
-    );
-    await pause(2500);
+    log("SYS // DEMO TOUR: Beat 3 — Under the hood reveal: 1,000-path Monte Carlo VaR, Markowitz Pareto optimizer, and task velocity.");
+    await pause(3000);
     if (!live()) return;
 
     log("SYS // DEMO TOUR: Tour complete. Terminal is fully interactive.");

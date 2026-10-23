@@ -2,7 +2,7 @@ import { create } from "zustand";
 
 export interface TourBeat {
   id: number;
-  panel: "order-book" | "task-tree" | "equity-curve" | "nba" | "all";
+  panel: "launchpad" | "focus-card" | "order-book" | "task-tree" | "equity-curve" | "nba" | "all";
   badge: string;
   title: string;
   summary: string;
@@ -12,43 +12,27 @@ export interface TourBeat {
 export const TOUR_BEATS: TourBeat[] = [
   {
     id: 1,
-    panel: "order-book",
-    badge: "ACT 1 · THE CRISIS",
-    title: "COURSE GRADE DRAWDOWN & MARGIN CALL",
-    summary: "CS 3801 Distributed Systems is at 88.0% against a 90.0% target floor.",
-    narrative: "Margin Call audit flags an active deficit. Student risks losing the honors bracket without immediate triage.",
+    panel: "launchpad",
+    badge: "BEAT 1 · MULTIMODAL INGEST",
+    title: "SYLLABUS DECONSTRUCTION & LOCAL SANDBOX",
+    summary: "Drop an unformatted paper syllabus photo or digital PDF.",
+    narrative: "Meta Llama 3.2 Vision parses grading criteria, guarantees rubric constraints (Σ weights = 100%), and isolates course records client-side.",
   },
   {
     id: 2,
-    panel: "task-tree",
-    badge: "ACT 2 · META LLAMA TRIAGE",
-    title: "AGENTIC RUBRIC DECONSTRUCTION",
-    summary: "Multi-agent defense council breaks down Raft lab into 25-min Pomodoro tasks.",
-    narrative: "Live SSE streams tool calls, audits grading weights (test harness 60%, design doc 30%), and builds execution tree.",
+    panel: "focus-card",
+    badge: "BEAT 2 · 45-MINUTE ENGINE",
+    title: "CONSEQUENTIAL ACTION & CALENDAR SYNC",
+    summary: "Packs highest-leverage work into your next 45 minutes.",
+    narrative: "Harmonizes with circuit breakers to lock in final course points, protect scholarship floor, and sync RFC 5545 calendar blocks with 24h & 2h alarms.",
   },
   {
     id: 3,
-    panel: "task-tree",
-    badge: "ACT 3 · ATOMIC EXECUTION",
-    title: "TASK FILL & COMPLETION VELOCITY",
-    summary: "Completing leaf tasks updates real-time completion velocity and recomputes grade floor.",
-    narrative: "Actual study minutes are logged to persistent storage. Velocity auditor dynamically rescales remaining work.",
-  },
-  {
-    id: 4,
-    panel: "equity-curve",
-    badge: "ACT 4 · RISK MODELING",
-    title: "1,000-PATH MONTE CARLO & 90% VAR",
-    summary: "What-If simulation perturbs exam scores to model downside volatility.",
-    narrative: "90% Value-at-Risk calculates the worst-case semester GPA outcome, quantifying grade buffer margin.",
-  },
-  {
-    id: 5,
     panel: "all",
-    badge: "ACT 5 · PARETO ALLOCATION",
-    title: "MARKOWITZ EFFICIENT FRONTIER & CALENDAR",
-    summary: "Convex Pareto optimizer allocates weekly hours for maximum GPA yield.",
-    narrative: "Exports live RFC 5545 calendar stream with 24h & 2h focus alarms directly to Google & Apple Calendar.",
+    badge: "BEAT 3 · UNDER THE HOOD",
+    title: "BLOOMBERG QUANTITATIVE WORKSTATION",
+    summary: "The institutional trading engine powering student grades (Key U / Key H).",
+    narrative: "1,000-path stochastic Monte Carlo simulation, 90% Value-at-Risk floor, Markowitz Pareto study allocator, and task velocity tracking.",
   },
 ];
 

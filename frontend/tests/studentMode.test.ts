@@ -63,13 +63,11 @@ describe("Judge Demo Tour Store", () => {
     useTourStore.getState().stop();
   });
 
-  it("has 5 sequential demonstration acts", () => {
-    expect(TOUR_BEATS.length).toBe(5);
-    expect(TOUR_BEATS[0].badge).toContain("ACT 1");
-    expect(TOUR_BEATS[1].badge).toContain("ACT 2");
-    expect(TOUR_BEATS[2].badge).toContain("ACT 3");
-    expect(TOUR_BEATS[3].badge).toContain("ACT 4");
-    expect(TOUR_BEATS[4].badge).toContain("ACT 5");
+  it("has 3 sequential demonstration beats", () => {
+    expect(TOUR_BEATS.length).toBe(3);
+    expect(TOUR_BEATS[0].badge).toContain("BEAT 1");
+    expect(TOUR_BEATS[1].badge).toContain("BEAT 2");
+    expect(TOUR_BEATS[2].badge).toContain("BEAT 3");
   });
 
   it("navigates beats within valid bounds", () => {

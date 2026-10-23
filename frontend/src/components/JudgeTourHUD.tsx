@@ -22,15 +22,19 @@ export function JudgeTourHUD() {
 
     // Pulse highlight target panel
     const selector =
-      beat.panel === "order-book"
-        ? '[data-tour="order-book"]'
-        : beat.panel === "task-tree"
-          ? '[data-tour="task-tree"]'
-          : beat.panel === "equity-curve"
-            ? '[data-tour="equity-curve"]'
-            : beat.panel === "nba"
-              ? '[data-tour="nba"]'
-              : null;
+      beat.panel === "launchpad"
+        ? '[data-tour="launchpad"]'
+        : beat.panel === "focus-card"
+          ? '[data-tour="focus-card"]'
+          : beat.panel === "order-book"
+            ? '[data-tour="order-book"]'
+            : beat.panel === "task-tree"
+              ? '[data-tour="task-tree"]'
+              : beat.panel === "equity-curve"
+                ? '[data-tour="equity-curve"]'
+                : beat.panel === "nba"
+                  ? '[data-tour="nba"]'
+                  : null;
 
     if (selector) {
       const el = document.querySelector(selector);

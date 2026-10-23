@@ -103,6 +103,7 @@ export function LaunchPad({ onOpenWorkstation, className = "" }: LaunchPadProps)
         {/* Left Column: Drop-Zone (5 cols) */}
         <div className="flex flex-col gap-4 lg:col-span-5">
           <div
+            data-tour="launchpad"
             onDragOver={(e) => {
               e.preventDefault();
               setDragActive(true);

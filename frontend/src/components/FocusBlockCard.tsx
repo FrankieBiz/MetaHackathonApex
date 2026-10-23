@@ -41,6 +41,7 @@ export function FocusBlockCard({
   return (
     <div
       data-testid="focus-block-card"
+      data-tour="focus-card"
       className={`flex flex-col border border-accent/40 bg-head/90 p-5 shadow-2xl backdrop-blur-sm ${className}`}
     >
       {/* Eyebrow & Badges */}
