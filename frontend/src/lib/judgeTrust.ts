@@ -9,6 +9,13 @@ export const SANDBOX_BADGE = {
     "Client-side ephemeral execution; course records remain local without public cloud logging",
 } as const;
 
+/** Marks the launch pad's CS-101 demo so it is never mistaken for an extraction. */
+export const SAMPLE_BADGE = {
+  label: "SAMPLE · Offline Sandbox",
+  tooltip:
+    "Bundled CS-101 sample data built in this browser; no syllabus was uploaded or read by a model",
+} as const;
+
 export const JUDGE_TOUR_BUTTON = {
   label: "🚀 60s JUDGE TOUR",
   hotkey: "D",

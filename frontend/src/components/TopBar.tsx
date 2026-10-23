@@ -497,6 +497,8 @@ export function TopBar() {
   const toggleSound = useTerminal((s) => s.toggleSound);
   const studentMode = useTerminal((s) => s.studentMode);
   const toggleStudentMode = useTerminal((s) => s.toggleStudentMode);
+  const workstationOpen = useTerminal((s) => s.workstationOpen);
+  const toggleWorkstation = useTerminal((s) => s.toggleWorkstation);
   const setTokenOpen = useTerminal((s) => s.setTokenOpen);
   const setPaletteOpen = useTerminal((s) => s.setPaletteOpen);
   const setSyllabusOpen = useSyllabusIngest((s) => s.setOpen);
@@ -534,6 +536,17 @@ export function TopBar() {
             {JUDGE_TOUR_BUTTON.label}
             <span aria-hidden className="ml-1.5 border border-accent/50 px-1 text-[10px] leading-[14px]">
               {JUDGE_TOUR_BUTTON.hotkey}
+            </span>
+          </Key>
+          <Key
+            tone={workstationOpen ? "accent" : undefined}
+            onClick={() => toggleWorkstation()}
+            title="Toggle Bloomberg quantitative workstation / 45-minute focus launchpad (hotkey H)"
+            aria-label="Toggle quantitative workstation"
+          >
+            {workstationOpen ? "◀ 45-MIN FOCUS" : "🏛️ WORKSTATION"}
+            <span aria-hidden className="ml-1.5 border border-accent/50 px-1 text-[10px] leading-[14px]">
+              H
             </span>
           </Key>
           <Key

@@ -84,6 +84,26 @@ function PaletteDialog({
     const course = activeCourseOf({ data, selectedId, activeCourseId });
     const actions: Command[] = [
       {
+        id: "workstation-toggle",
+        label: store.workstationOpen
+          ? "RETURN TO 45-MINUTE FOCUS LAUNCHPAD"
+          : "OPEN BLOOMBERG WORKSTATION (UNDER THE HOOD)",
+        hint: store.workstationOpen
+          ? "Single-decision hero view and calendar scheduling"
+          : "Multi-panel order book, equity curve & velocity terminal",
+        shortcut: "H",
+        run: () => store.toggleWorkstation(),
+      },
+      {
+        id: "student-mode",
+        label: store.studentMode
+          ? "SWITCH TO FINANCIAL ENGINEERING TERMINOLOGY"
+          : "SWITCH TO STUDENT MODE (PLAIN ENGLISH)",
+        hint: "Collegiate subtitles vs Wall Street quantitative density",
+        shortcut: "U",
+        run: () => store.toggleStudentMode(),
+      },
+      {
         id: "tour",
         label: "RUN JUDGE DEMO TOUR",
         hint: "Automated trading desk walkthrough",

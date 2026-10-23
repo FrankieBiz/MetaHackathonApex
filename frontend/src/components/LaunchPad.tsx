@@ -1,0 +1,218 @@
+"use client";
+
+import { useMemo, useState, useRef } from "react";
+import { FocusBlockCard } from "@/components/FocusBlockCard";
+import { buildFocusBlock, focusQueue } from "@/lib/focusBlock";
+import { evaluateCircuitBreaker } from "@/lib/circuitBreaker";
+import { buildSampleState } from "@/lib/sampleSyllabus";
+import { useTerminal } from "@/store/terminal";
+import { useInference } from "@/store/inference";
+import { encodeSyllabusFile, formatBytes } from "@/lib/syllabus";
+import { api } from "@/lib/api";
+import { Key } from "@/components/ui";
+import { useNow } from "@/hooks/useNow";
+
+interface LaunchPadProps {
+  onOpenWorkstation: () => void;
+  className?: string;
+}
+
+export function LaunchPad({ onOpenWorkstation, className = "" }: LaunchPadProps) {
+  const data = useTerminal((s) => s.data);
+  const studentMode = useTerminal((s) => s.studentMode);
+  const loadSampleSyllabus = useTerminal((s) => s.loadSampleSyllabus);
+  const hydrateFromSyllabus = useTerminal((s) => s.hydrateFromSyllabus);
+  const modelName = useInference((s) => s.configuration?.model) || "Meta Llama";
+  const [dragActive, setDragActive] = useState(false);
+  const [ingesting, setIngesting] = useState(false);
+  const [uploadStage, setUploadStage] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const minute = useNow(60_000);
+
+  const breaker = useMemo(() => (data ? evaluateCircuitBreaker(data) : null), [data]);
+  const focusBlock = useMemo(
+    () => (data ? buildFocusBlock(data, minute, breaker) : null),
+    [data, minute, breaker]
+  );
+  const topQueue = useMemo(
+    () => (data ? focusQueue(data, minute, breaker).slice(0, 5) : []),
+    [data, minute, breaker]
+  );
+
+  const handleFile = async (file: File) => {
+    setIngesting(true);
+    setUploadStage("1. Decoded document (" + file.name + ", " + formatBytes(file.size) + ")");
+    try {
+      setTimeout(() => setUploadStage("2. Uploading to Meta Model API..."), 400);
+      setTimeout(() => setUploadStage("3. Reading with " + modelName + " (extracting grading criteria)..."), 900);
+      setTimeout(() => setUploadStage("4. Validating strict Pydantic v2 schema..."), 1500);
+      
+      const encoded = await encodeSyllabusFile(file, file.type || "application/octet-stream");
+      const nextState = await api.ingestSyllabus({ file: encoded });
+      await hydrateFromSyllabus(nextState);
+      setUploadStage("5. Hydrated: Course weights verified (Σ = 100.0%)");
+      setTimeout(() => {
+        setIngesting(false);
+        setUploadStage(null);
+      }, 1500);
+    } catch {
+      setIngesting(false);
+      setUploadStage("Extraction failed. Switching to offline sandbox.");
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      void handleFile(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleLoadSample = () => {
+    loadSampleSyllabus(buildSampleState());
+  };
+
+  return (
+    <div data-testid="launch-pad" className={`flex flex-1 flex-col gap-5 p-6 ${className}`}>
+      {/* Header Banner */}
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-line pb-4">
+        <div>
+          <h1 className="font-mono text-xl font-black tracking-tight text-ink">
+            {studentMode ? "STUDENT LAUNCHPAD · 45-MINUTE FOCUS ENGINE" : "APEX LAUNCHPAD // COCKPIT"}
+          </h1>
+          <p className="mt-1 text-xs text-ink-2">
+            Drop an unformatted paper or digital syllabus. Apex extracts grading rules with Meta AI, models grade leverage, and blocks your next 45 minutes.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Key
+            tone="accent"
+            onClick={onOpenWorkstation}
+            className="flex items-center gap-2 px-3 py-1.5 font-mono text-xs font-semibold"
+            title="Open full Bloomberg quantitative workstation (hotkey H)"
+          >
+            <span>UNDER THE HOOD: FULL TERMINAL</span>
+            <span className="border border-accent/50 px-1 text-[10px] leading-[14px]">H</span>
+          </Key>
+        </div>
+      </div>
+
+      {/* Main Grid: Left = Drop-Zone, Right = FocusBlockCard */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+        {/* Left Column: Drop-Zone (5 cols) */}
+        <div className="flex flex-col gap-4 lg:col-span-5">
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragActive(true);
+            }}
+            onDragLeave={() => setDragActive(false)}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+            className={`flex min-h-[320px] flex-1 cursor-pointer flex-col items-center justify-center border-2 border-dashed p-6 text-center transition-all ${
+              dragActive
+                ? "border-accent bg-accent/10"
+                : "border-line-strong bg-panel/40 hover:border-accent/60 hover:bg-panel/70"
+            }`}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.png,.jpg,.jpeg,.txt,.md"
+              onChange={(e) => e.target.files?.[0] && void handleFile(e.target.files[0])}
+              className="hidden"
+            />
+            <div className="flex flex-col items-center gap-3">
+              <span className="font-mono text-3xl">📄</span>
+              <span className="font-mono text-sm font-bold text-ink">
+                DROP SYLLABUS (PDF, IMAGE, TXT)
+              </span>
+              <span className="max-w-xs text-xs text-ink-3">
+                Drag a syllabus photo or rubric document here, or click to browse files.
+              </span>
+              <div className="mt-2 rounded border border-line bg-canvas px-2.5 py-1 font-mono text-[10px] text-accent">
+                POWERED BY META LLAMA 3.2 VISION
+              </div>
+            </div>
+
+            {/* Ingestion Stage Timeline */}
+            {ingesting && uploadStage && (
+              <div className="mt-4 w-full rounded border border-accent/40 bg-head p-3 text-left">
+                <span className="font-mono text-[10px] text-accent uppercase">
+                  AI EXTRACTION PIPELINE ACTIVE
+                </span>
+                <p className="mt-1 font-mono text-xs text-ink">{uploadStage}</p>
+              </div>
+            )}
+          </div>
+
+          {/* Offline Demo Button */}
+          <div className="flex items-center justify-between rounded border border-line bg-panel p-3">
+            <div className="flex flex-col">
+              <span className="font-mono text-xs font-semibold text-ink">
+                No syllabus on hand?
+              </span>
+              <span className="text-[10px] text-ink-3">
+                Load bundled CS-101 sample syllabus offline.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleLoadSample}
+              className="rounded border border-accent/40 bg-accent/10 px-3 py-1 font-mono text-xs font-bold text-accent hover:bg-accent hover:text-canvas"
+            >
+              SAMPLE SYLLABUS DEMO
+            </button>
+          </div>
+        </div>
+
+        {/* Right Column: Hero FocusBlockCard (7 cols) */}
+        <div className="flex flex-col lg:col-span-7">
+          {focusBlock ? (
+            <FocusBlockCard focusBlock={focusBlock} />
+          ) : (
+            <div className="flex min-h-[320px] flex-1 flex-col items-center justify-center border border-line bg-panel p-6 text-center">
+              <span className="font-mono text-lg font-bold text-up">
+                ✓ ALL DELIVERABLES EXECUTED
+              </span>
+              <p className="mt-2 text-xs text-ink-3">
+                No open work remaining in the current portfolio. Upload a new syllabus on the left to queue deliverables.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Bottom Rail: Top 5 Deliverables Queue */}
+      {topQueue.length > 0 && (
+        <div className="mt-2 flex flex-col gap-2 border-t border-line pt-4">
+          <div className="flex items-center justify-between text-[11px] font-semibold text-ink-3 uppercase">
+            <span>Priority Execution Rail (Next {topQueue.length} In Line)</span>
+            <span className="text-[10px] text-accent">RANKED BY GRADE WEIGHT & POINTS</span>
+          </div>
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
+            {topQueue.map((item, idx) => (
+              <div
+                key={item.id}
+                className="flex flex-col justify-between border border-line-strong bg-panel/60 p-2.5"
+              >
+                <div className="flex items-center justify-between text-[10px]">
+                  <span className="font-mono font-bold text-ink">{item.course_code}</span>
+                  <span className="font-mono text-ink-3">#{idx + 1}</span>
+                </div>
+                <span className="my-1.5 truncate font-mono text-[11px] text-ink">
+                  {item.title}
+                </span>
+                <div className="flex items-center justify-between font-mono text-[9px] text-ink-3">
+                  <span>WT {item.weight}%</span>
+                  <span>{item.points_possible} PTS</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

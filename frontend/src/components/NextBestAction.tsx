@@ -12,6 +12,8 @@ import {
   simulatable,
   volatilityRegime,
 } from "@/lib/engine";
+import { evaluateCircuitBreaker, LEVEL_STYLE } from "@/lib/circuitBreaker";
+import { focusQueue } from "@/lib/focusBlock";
 import { minutes, signed } from "@/lib/format";
 import { GLOSSARY } from "@/lib/glossary";
 import { useTerminal } from "@/store/terminal";
@@ -74,7 +76,12 @@ export function NextBestAction() {
 
   const view = useMemo(() => {
     if (!data) return null;
-    const action = nextBestAction(data, minute);
+    const breaker = evaluateCircuitBreaker(data);
+    const queuedAssignments = focusQueue(data, minute, breaker);
+    const action = nextBestAction(
+      { courses: data.courses, assignments: queuedAssignments },
+      minute,
+    );
     if (!action) return null;
     const { course } = action;
     const forecast = course
@@ -82,6 +89,7 @@ export function NextBestAction() {
       : null;
     return {
       action,
+      breaker,
       safety: course?.portfolio_margin ?? null,
       valueAtRisk:
         forecast && course?.current_score != null
@@ -103,11 +111,13 @@ export function NextBestAction() {
     );
   }
 
-  const { action, safety, valueAtRisk, volatility } = view;
+  const { action, breaker, safety, valueAtRisk, volatility } = view;
   const { assignment, course, leaf } = action;
   const busy = Boolean(triaging[assignment.id]);
   const floor = floorFigure(action.floor);
   const regime = volatilityRegime(volatility);
+  const breakerActive = breaker && breaker.level !== "NORMAL";
+  const breakerRank = breaker ? LEVEL_STYLE[breaker.level].rank : 0;
   const execute = () => {
     const store = useTerminal.getState();
     if (leaf) store.select(assignment.id);
@@ -118,13 +128,17 @@ export function NextBestAction() {
     <section
       aria-label="Next best action"
       aria-live="polite"
-      className="flex shrink-0 flex-wrap items-center gap-x-6 gap-y-2 border-b border-line border-l-2 border-l-accent bg-head px-3 py-2"
+      className={`flex shrink-0 flex-wrap items-center gap-x-6 gap-y-2 border-b border-line border-l-2 ${
+        breakerActive ? "border-l-accent bg-head/95" : "border-l-accent bg-head"
+      } px-3 py-2`}
     >
       <div className="flex min-w-0 flex-[1_1_18rem] flex-col gap-1">
-        <span className="text-[10px] tracking-wider text-accent">
-          {studentMode
-            ? "▶ TOP PRIORITY ACTION · HIGHEST GPA IMPACT"
-            : "▶ NEXT BEST ACTION · TONIGHT"}
+        <span className="text-[10px] tracking-wider text-accent font-mono">
+          {breakerActive
+            ? `▶ CIRCUIT BREAKER L${breakerRank} · ${breaker.level.replace(/_/g, " ")} · FOCUSING ${assignment.course_code}`
+            : studentMode
+              ? "▶ TOP PRIORITY ACTION · HIGHEST GPA IMPACT"
+              : "▶ NEXT BEST ACTION · TONIGHT"}
         </span>
         <span
           key={leaf?.id ?? assignment.id}

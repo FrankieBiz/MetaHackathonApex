@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { findNode, leaves, velocityByCourse } from "@/lib/engine";
 import { createMockState } from "@/lib/mockData";
+import { SAMPLE_COURSE_ID, sampleSyllabusState } from "@/lib/sampleSyllabus";
 import type { AgentReasoningStep, SubTaskNode, TerminalState } from "@/types";
 
 /** The backend agent's four steps, as /api/decompose returns them. */
@@ -688,5 +689,136 @@ describe("syllabus ingest", () => {
     await expect(ingest(store)).rejects.toMatchObject({ kind: "network" });
     expect(store.getState().data).toBe(before);
     expect(store.getState().origin).toBe("sandbox");
+  });
+});
+
+describe("sample syllabus on the offline sandbox", () => {
+  let session: Storage;
+
+  beforeEach(() => {
+    session = memoryStorage();
+    vi.stubGlobal("window", {
+      localStorage: memoryStorage(),
+      sessionStorage: session,
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const sample = () => sampleSyllabusState(Date.now());
+
+  it("replaces the book with CS-101 and pins the offline desk", async () => {
+    const store = await loadStore();
+    await store.getState().boot();
+    expect(store.getState().mode).toBe("backend-demo");
+
+    const book = sample();
+    store.getState().loadSampleSyllabus(book);
+
+    const state = store.getState();
+    expect(state.mode).toBe("offline");
+    expect(state.origin).toBe("sandbox");
+    expect(state.simulationPinned).toBe(true);
+    expect(session.getItem("apex-terminal:simulation-pinned")).toBe("1");
+    expect(state.data).toEqual(book);
+    expect(state.data!.courses.map((c) => c.course_code)).toEqual(["CS-101"]);
+    expect(state.activeCourseId).toBe(SAMPLE_COURSE_ID);
+    expect(state.data!.assignments.map((a) => a.id)).toContain(
+      state.selectedId,
+    );
+  });
+
+  it("clears the previous session's plans and traces", async () => {
+    const store = await loadStore();
+    await store.getState().boot();
+    store.setState({ studyErrors: { x: "boom" }, traces: {} });
+
+    store.getState().loadSampleSyllabus(sample());
+    expect(store.getState().studyErrors).toEqual({});
+    expect(store.getState().studyPlans).toEqual({});
+  });
+
+  it("stays off the network, so a poll cannot replace the sample", async () => {
+    const store = await loadStore();
+    await store.getState().boot();
+    store.getState().loadSampleSyllabus(sample());
+
+    const calls = fake.backend.calls.length;
+    expect(await store.getState().refresh()).toBe(false);
+    await store.getState().sync();
+    expect(fake.backend.calls).toHaveLength(calls);
+    expect(store.getState().data!.courses).toHaveLength(1);
+  });
+
+  it("keeps editing local to the sandbox", async () => {
+    const store = await loadStore();
+    await store.getState().boot();
+    store.getState().loadSampleSyllabus(sample());
+
+    const calls = fake.backend.calls.length;
+    const lab = store
+      .getState()
+      .data!.assignments.find((a) => a.subtasks.length > 0)!;
+    store.getState().toggle(lab.id, lab.subtasks[0].id, true);
+    expect(fake.backend.calls).toHaveLength(calls);
+    expect(
+      store
+        .getState()
+        .data!.assignments.find((a) => a.id === lab.id)!
+        .subtasks.find((t) => t.id === lab.subtasks[0].id)!.is_completed,
+    ).toBe(true);
+  });
+
+  it("survives a reload while pinned", async () => {
+    const store = await loadStore();
+    await store.getState().boot();
+    store.getState().loadSampleSyllabus(sample());
+
+    const reloaded = await loadStore();
+    await reloaded.getState().boot();
+    expect(reloaded.getState().simulationPinned).toBe(true);
+    expect(reloaded.getState().data!.courses.map((c) => c.course_code)).toEqual(
+      ["CS-101"],
+    );
+  });
+
+  it("returns to live data on Ctrl+Shift+D", async () => {
+    const store = await loadStore();
+    await store.getState().boot();
+    store.getState().loadSampleSyllabus(sample());
+
+    await store.getState().toggleSimulation();
+    const state = store.getState();
+    expect(state.simulationPinned).toBe(false);
+    expect(state.mode).toBe("backend-demo");
+    expect(state.origin).toBe("backend");
+    expect(state.data!.courses.some((c) => c.id === SAMPLE_COURSE_ID)).toBe(
+      false,
+    );
+  });
+
+  it("works on a desk that was already offline", async () => {
+    fake.backend.down = true;
+    const store = await loadStore();
+    await store.getState().boot();
+    expect(store.getState().mode).toBe("offline");
+
+    store.getState().loadSampleSyllabus(sample());
+    expect(store.getState().data!.courses).toHaveLength(1);
+    expect(store.getState().simulationPinned).toBe(true);
+  });
+
+  it("logs what loaded and how to get back", async () => {
+    const store = await loadStore();
+    await store.getState().boot();
+    store.getState().loadSampleSyllabus(sample());
+
+    const [latest] = store.getState().events;
+    expect(latest.level).toBe("ok");
+    expect(latest.text).toContain("SAMPLE SYLLABUS");
+    expect(latest.text).toContain("CS-101");
+    expect(latest.text).toContain("Ctrl+Shift+D");
   });
 });

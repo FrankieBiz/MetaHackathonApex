@@ -10,6 +10,7 @@ import {
 import { CommandPalette } from "@/components/CommandPalette";
 import { EquityCurve } from "@/components/EquityCurve";
 import { JudgeTourHUD } from "@/components/JudgeTourHUD";
+import { LaunchPad } from "@/components/LaunchPad";
 import { NextBestAction } from "@/components/NextBestAction";
 import { OrderBook } from "@/components/OrderBook";
 import { PanelErrorBoundary } from "@/components/PanelErrorBoundary";
@@ -188,6 +189,13 @@ function useHotkeys() {
       if (key === "u" && !event.ctrlKey && !event.metaKey && !event.altKey) {
         event.preventDefault();
         state.toggleStudentMode();
+        return;
+      }
+
+      // Under the hood workstation toggle (H)
+      if (key === "h" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        state.toggleWorkstation();
         return;
       }
 
@@ -382,12 +390,19 @@ function Workstation() {
         <span className="truncate">
           Workstation · drag panel headers to rearrange, drag corners to resize
         </span>
-        <span className="flex shrink-0 items-center gap-3">
+        <span className="flex shrink-0 items-center gap-2 sm:gap-3">
           {lastSync && (
             <span className="hidden sm:inline">
               Last sync {stamp(lastSync)}
             </span>
           )}
+          <Key
+            tone="accent"
+            onClick={() => useTerminal.getState().setWorkstationOpen(false)}
+            title="Return to the 45-minute focus launchpad (hotkey H)"
+          >
+            ◀ 45-MIN FOCUS (H)
+          </Key>
           <Key onClick={resetLayout}>RESET LAYOUT</Key>
         </span>
       </div>
@@ -422,7 +437,6 @@ function Workstation() {
           </Responsive>
         )}
       </main>
-      <CommandPalette onResetLayout={resetLayout} />
     </>
   );
 }
@@ -442,17 +456,30 @@ function BootScreen() {
 
 export default function Terminal() {
   const ready = useTerminal((s) => s.data !== null);
+  const workstationOpen = useTerminal((s) => s.workstationOpen);
   useBackendLoop();
   useHotkeys();
+
+  const resetLayout = useCallback(() => {
+    clearLayouts();
+    saveLayouts(DEFAULT_LAYOUTS);
+  }, []);
 
   if (!ready) return <BootScreen />;
   return (
     <div className="flex h-full flex-col">
       <TopBar />
-      <Workstation />
+      {workstationOpen ? (
+        <Workstation />
+      ) : (
+        <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+          <LaunchPad onOpenWorkstation={() => useTerminal.getState().setWorkstationOpen(true)} />
+        </main>
+      )}
       <StatusBar />
       <TokenModal />
       <JudgeTourHUD />
+      <CommandPalette onResetLayout={resetLayout} />
     </div>
   );
 }

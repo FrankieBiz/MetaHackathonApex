@@ -46,16 +46,73 @@ interface Candidate {
   open: SubTaskNode[] | null;
 }
 
+/** The deliverable with its open work, or null when nothing is left to do. */
+function candidateOf(assignment: Assignment): Candidate | null {
+  if (isUntriaged(assignment)) return { assignment, open: null };
+  const open = leaves(assignment.subtasks).filter((leaf) => !leaf.is_completed);
+  return open.length ? { assignment, open } : null;
+}
+
 /** The first deliverable in the queue with work left to do. */
 function firstWorkable(queue: Assignment[]): Candidate | null {
   for (const assignment of queue) {
-    if (isUntriaged(assignment)) return { assignment, open: null };
-    const open = leaves(assignment.subtasks).filter(
-      (leaf) => !leaf.is_completed,
-    );
-    if (open.length) return { assignment, open };
+    const candidate = candidateOf(assignment);
+    if (candidate) return candidate;
   }
   return null;
+}
+
+interface Ordering {
+  /** Every open deliverable, by priority, halted courses included. */
+  queue: Assignment[];
+  /** What the block draws from: halted courses removed, protected work first. */
+  ordered: Assignment[];
+  guarded: Set<string>;
+  rank: number;
+}
+
+/**
+ * Under a Level 2 or 3 breaker, courses it halted are removed; at any
+ * triggered level, the work it protects goes ahead of the rest of the queue.
+ */
+function order(
+  state: TerminalState,
+  now: number,
+  breaker?: CircuitBreakerStatus | null,
+): Ordering {
+  const queue = rankQueue(
+    state.assignments.filter((a) => !a.graded),
+    now,
+  ).map((entry) => entry.assignment);
+
+  const rank = breaker ? LEVEL_STYLE[breaker.level].rank : 0;
+  const halted = new Set(rank >= 2 ? breaker?.halted_course_ids : []);
+  const guarded = new Set(rank >= 1 ? breaker?.protected_assignment_ids : []);
+  const eligible = queue.filter((a) => !halted.has(a.course_id));
+  return {
+    queue,
+    ordered: [
+      ...eligible.filter((a) => guarded.has(a.id)),
+      ...eligible.filter((a) => !guarded.has(a.id)),
+    ],
+    guarded,
+    rank,
+  };
+}
+
+/**
+ * The deliverables with work left, in the order the focus block draws from
+ * them. Its first entry is always the block's deliverable, so a queue shown
+ * beside the block can never name a halted course or disagree with it.
+ */
+export function focusQueue(
+  state: TerminalState,
+  now: number = Date.now(),
+  breaker?: CircuitBreakerStatus | null,
+): Assignment[] {
+  return order(state, now, breaker).ordered.filter(
+    (a) => candidateOf(a) !== null,
+  );
 }
 
 /**
@@ -103,19 +160,8 @@ export function buildFocusBlock(
   now: number = Date.now(),
   breaker?: CircuitBreakerStatus | null,
 ): FocusBlock | null {
-  const queue = rankQueue(
-    state.assignments.filter((a) => !a.graded),
-    now,
-  ).map((entry) => entry.assignment);
-
-  const rank = breaker ? LEVEL_STYLE[breaker.level].rank : 0;
-  const halted = new Set(rank >= 2 ? breaker?.halted_course_ids : []);
-  const guarded = new Set(rank >= 1 ? breaker?.protected_assignment_ids : []);
-  const eligible = queue.filter((a) => !halted.has(a.course_id));
-  const chosen = firstWorkable([
-    ...eligible.filter((a) => guarded.has(a.id)),
-    ...eligible.filter((a) => !guarded.has(a.id)),
-  ]);
+  const { queue, ordered, guarded, rank } = order(state, now, breaker);
+  const chosen = firstWorkable(ordered);
   if (!chosen) return null;
 
   const { assignment } = chosen;

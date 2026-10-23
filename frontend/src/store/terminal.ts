@@ -185,6 +185,9 @@ interface TerminalStore {
   queuedEdits: number;
   paletteOpen: boolean;
   tokenOpen: boolean;
+  workstationOpen: boolean;
+  setWorkstationOpen: (open: boolean) => void;
+  toggleWorkstation: () => void;
   soundOn: boolean;
   toggleSound: () => void;
   studentMode: boolean;
@@ -214,6 +217,12 @@ interface TerminalStore {
   hydrateFromSyllabus: (state: TerminalState) => Promise<void>;
   /** Merges a locally built course book (an offline sample syllabus) into the book on screen. */
   hydrateLocalSyllabus: (state: TerminalState, reason: string) => void;
+  /**
+   * Replaces the book with a bundled sample on the pinned offline sandbox, in
+   * any connection mode, so no backend poll can swap it out. Ctrl+Shift+D
+   * returns to live data.
+   */
+  loadSampleSyllabus: (state: TerminalState) => void;
 }
 
 const isRemote = (mode: ConnectionMode) =>
@@ -541,6 +550,7 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
     queuedEdits: 0,
     paletteOpen: false,
     tokenOpen: false,
+    workstationOpen: false,
     soundOn: soundEnabled(),
     studentMode: studentModeEnabled(),
     scenario: {},
@@ -1140,6 +1150,9 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
 
     setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
     setTokenOpen: (tokenOpen) => set({ tokenOpen }),
+    setWorkstationOpen: (workstationOpen) => set({ workstationOpen }),
+    toggleWorkstation: () =>
+      set((s) => ({ workstationOpen: !s.workstationOpen })),
 
     hydrateFromSyllabus: async (state) => {
       const known = new Set(get().data?.courses.map((c) => c.id));
@@ -1187,6 +1200,31 @@ export const useTerminal = create<TerminalStore>()((set, get) => {
         } · ${next.courses.length} courses, ${next.assignments.length} assignments on the book (${reason}${
           remote ? "; replaced by the next backend sync" : ""
         }).`,
+      );
+    },
+
+    loadSampleSyllabus: (sample) => {
+      if (!get().simulationPinned) {
+        writePin(true);
+        set({ simulationPinned: true });
+      }
+      datasetVersion += 1;
+      set({
+        origin: "sandbox",
+        mode: "offline",
+        studyPlans: {},
+        studyErrors: {},
+        traces: {},
+        selectedId: topOfQueue(sample),
+        activeCourseId: sample.courses[0]?.id ?? null,
+      });
+      commit(sample);
+      playFill();
+      log(
+        "ok",
+        `SYS // SAMPLE SYLLABUS LOADED · ${sample.courses
+          .map((c) => c.course_code)
+          .join(", ")} on the offline sandbox · ${sample.assignments.length} assignments. Backend polling paused; Ctrl+Shift+D returns to live Canvas.`,
       );
     },
   };

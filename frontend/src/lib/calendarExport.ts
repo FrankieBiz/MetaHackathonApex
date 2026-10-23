@@ -1,5 +1,7 @@
 import type { TerminalState } from "@/types";
 import { priorityScore } from "@/lib/engine";
+import { FOCUS_BLOCK_MINUTES, type FocusBlock } from "@/lib/focusBlock";
+import { pct, signed } from "@/lib/format";
 
 export interface CalendarExportOptions {
   includeStudyBlocks?: boolean;
@@ -305,16 +307,12 @@ export function generateClientIcsCalendar(
   return lines.map((l) => foldIcs(l)).join("\r\n") + "\r\n";
 }
 
-export function downloadCalendarIcs(
-  data: TerminalState,
-  options: CalendarExportOptions = {},
-): void {
-  const ics = generateClientIcsCalendar(data, options);
+function saveIcs(ics: string, filename: string): void {
   const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `apex-academic-schedule-${new Date().toISOString().slice(0, 10)}.ics`;
+  link.download = filename;
   document.body.appendChild(link);
   try {
     link.click();
@@ -322,6 +320,137 @@ export function downloadCalendarIcs(
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+}
+
+export function downloadCalendarIcs(
+  data: TerminalState,
+  options: CalendarExportOptions = {},
+): void {
+  saveIcs(
+    generateClientIcsCalendar(data, options),
+    `apex-academic-schedule-${new Date().toISOString().slice(0, 10)}.ics`,
+  );
+}
+
+const MINUTE_MS = 60_000;
+const HOUR_MS = 3_600_000;
+
+/**
+ * Deadline warnings on a focus block. The block starts within minutes, so a
+ * reminder cannot sit before its start; these are absolute, set before the
+ * deliverable's due date, and any already past are left out.
+ */
+const FOCUS_WARNINGS = [
+  { lead: 24 * HOUR_MS, label: "Apex 24h Warning" },
+  { lead: 2 * HOUR_MS, label: "Apex 2h Urgent Warning" },
+] as const;
+
+/** A block begins on the current minute. */
+export const focusBlockStart = (now: number): number =>
+  Math.floor(now / MINUTE_MS) * MINUTE_MS;
+
+const focusBlockTitle = (block: FocusBlock) =>
+  `[FOCUS] ${block.course_code}: ${block.assignment_title}`;
+
+function focusBlockDetails(block: FocusBlock): string[] {
+  const due = block.due_at ? Date.parse(block.due_at) : NaN;
+  return [
+    `Course: ${block.course_code}`,
+    `Deliverable: ${block.assignment_title}`,
+    `Why now: ${block.policy_reason}`,
+    ...(Number.isNaN(due) ? [] : [`Due: ${new Date(due).toISOString()}`]),
+    `Break-even score: ${pct(block.break_even_score)}`,
+    `Grade points locked in: ${signed(block.points_locked_in)}`,
+    `Downside grade floor: ${
+      block.downside_floor === null ? pct(null) : `≥${pct(block.downside_floor)}`
+    }`,
+    "Tasks:",
+    ...block.tasks.map(
+      (t) =>
+        `  ${t.is_completed ? "[x]" : "[ ]"} ${t.title} (${t.estimated_minutes}m)`,
+    ),
+  ];
+}
+
+/** One .ics calendar holding the focus block as a single 45 minute event. */
+export function generateFocusBlockIcs(
+  block: FocusBlock,
+  startAt: number | Date,
+  now = Date.now(),
+): string {
+  const start = new Date(startAt);
+  const end = new Date(start.getTime() + FOCUS_BLOCK_MINUTES * MINUTE_MS);
+  const due = block.due_at ? Date.parse(block.due_at) : NaN;
+  const code = block.course_code;
+
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Apex OS//Academic Terminal RFC5545//EN",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    "X-WR-CALNAME:Apex OS Focus Block",
+    "X-WR-TIMEZONE:UTC",
+    "BEGIN:VEVENT",
+    `UID:apex-focus-block-${block.assignment_id}-${formatIcsUtc(start)}@apex.terminal`,
+    `DTSTAMP:${formatIcsUtc(new Date(now))}`,
+    `DTSTART:${formatIcsUtc(start)}`,
+    `DTEND:${formatIcsUtc(end)}`,
+    `SUMMARY:${escapeIcs(focusBlockTitle(block))}`,
+    `DESCRIPTION:${escapeIcs(focusBlockDetails(block).join("\n"))}`,
+    `CATEGORIES:STUDY,FOCUS,${code}`,
+    "PRIORITY:3",
+    "STATUS:CONFIRMED",
+  ];
+  for (const { lead, label } of FOCUS_WARNINGS) {
+    if (Number.isNaN(due) || due - lead <= now) continue;
+    lines.push(
+      "BEGIN:VALARM",
+      `TRIGGER;VALUE=DATE-TIME:${formatIcsUtc(new Date(due - lead))}`,
+      "ACTION:DISPLAY",
+      `DESCRIPTION:${label}: [${code}] ${escapeIcs(block.assignment_title)}`,
+      "END:VALARM",
+    );
+  }
+  lines.push("END:VEVENT", "END:VCALENDAR");
+  return lines.map((l) => foldIcs(l)).join("\r\n") + "\r\n";
+}
+
+/** A Google Calendar event prefilled with the same 45 minutes. */
+export function focusBlockGoogleUrl(
+  block: FocusBlock,
+  startAt: number | Date,
+): string {
+  const start = new Date(startAt);
+  return googleCalendarUrl({
+    title: focusBlockTitle(block),
+    description: focusBlockDetails(block).join("\n"),
+    start,
+    end: new Date(start.getTime() + FOCUS_BLOCK_MINUTES * MINUTE_MS),
+  });
+}
+
+/**
+ * Downloads the focus block as a single-event .ics and opens Google Calendar
+ * prefilled with it. `opened` is false when the browser blocked the new tab;
+ * the download still happened.
+ */
+export function addFocusBlockToCalendar(
+  block: FocusBlock,
+  now = Date.now(),
+): { googleUrl: string; opened: boolean } {
+  const start = focusBlockStart(now);
+  const course = block.course_code.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  saveIcs(
+    generateFocusBlockIcs(block, start, now),
+    `apex-focus-block-${course}-${new Date(now).toISOString().slice(0, 10)}.ics`,
+  );
+  const googleUrl = focusBlockGoogleUrl(block, start);
+  // No "noopener" feature: it makes open() return null even on success, which
+  // would hide a blocked tab. Severing the opener by hand keeps it isolated.
+  const popup = window.open(googleUrl, "_blank");
+  if (popup) popup.opener = null;
+  return { googleUrl, opened: Boolean(popup) };
 }
 
 export function getWebcalUrl(options: CalendarExportOptions = {}): string {

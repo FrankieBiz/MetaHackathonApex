@@ -1,14 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  addFocusBlockToCalendar,
   downloadCalendarIcs,
   escapeIcs,
+  focusBlockGoogleUrl,
+  focusBlockStart,
   foldIcs,
   formatIcsUtc,
   generateClientIcsCalendar,
+  generateFocusBlockIcs,
   getCalendarPreviewItems,
   getWebcalUrl,
   googleCalendarUrl,
 } from "@/lib/calendarExport";
+import type { FocusBlock } from "@/lib/focusBlock";
 import { createMockState } from "@/lib/mockData";
 
 const NOW = Date.parse("2026-10-19T12:00:00Z");
@@ -171,5 +176,177 @@ describe("generateClientIcsCalendar", () => {
 
     vi.runAllTimers();
     expect(revoke).toHaveBeenCalledWith("blob:calendar-ics");
+  });
+});
+
+describe("focus block calendar export", () => {
+  const HOUR_MS = 3_600_000;
+  const START = Date.parse("2026-10-19T12:07:00Z");
+  const block = (overrides: Partial<FocusBlock> = {}): FocusBlock => ({
+    assignment_id: "a-1",
+    course_id: "c-1",
+    course_code: "CS-101",
+    assignment_title: "Binary Trees Lab",
+    due_at: new Date(START + 72 * HOUR_MS).toISOString(),
+    break_even_score: 71.5,
+    points_locked_in: 4.2,
+    downside_floor: 63.75,
+    total_minutes: 45,
+    tasks: [
+      { id: "t1", title: "Sketch the node API", estimated_minutes: 20, is_completed: false },
+      { id: "t2", title: "Write insert, delete", estimated_minutes: 25, is_completed: false },
+    ],
+    policy_reason: "HIGHEST GRADE YIELD · TOP OF QUEUE",
+    ...overrides,
+  });
+  const unfold = (ics: string) => ics.replace(/\r\n /g, "");
+  const alarms = (ics: string) =>
+    unfold(ics)
+      .split("BEGIN:VALARM")
+      .slice(1)
+      .map((part) => part.split("END:VALARM")[0]);
+
+  it("starts a block on the current minute", () => {
+    expect(focusBlockStart(Date.parse("2026-10-19T12:07:41.500Z"))).toBe(START);
+    expect(focusBlockStart(START)).toBe(START);
+  });
+
+  it("writes one calendar holding exactly one 45 minute event", () => {
+    const ics = generateFocusBlockIcs(block(), START, START);
+    expect(ics.startsWith("BEGIN:VCALENDAR\r\n")).toBe(true);
+    expect(ics.endsWith("END:VCALENDAR\r\n")).toBe(true);
+    expect(ics.match(/BEGIN:VEVENT/g)).toHaveLength(1);
+    expect(ics.match(/END:VEVENT/g)).toHaveLength(1);
+    expect(ics).toContain("DTSTART:20261019T120700Z");
+    expect(ics).toContain("DTEND:20261019T125200Z");
+    expect(ics).toContain("UID:apex-focus-block-a-1-20261019T120700Z@apex.terminal");
+    // Every line break is CRLF: nothing is left once those are removed.
+    expect(ics.replaceAll("\r\n", "")).not.toMatch(/[\r\n]/);
+  });
+
+  it("names the course and deliverable and lists the tasks and grade math", () => {
+    const text = unfold(generateFocusBlockIcs(block(), START, START));
+    expect(text).toContain("SUMMARY:[FOCUS] CS-101: Binary Trees Lab");
+    expect(text).toContain("CATEGORIES:STUDY,FOCUS,CS-101");
+    expect(text).toContain("[ ] Sketch the node API (20m)");
+    expect(text).toContain("[ ] Write insert\\, delete (25m)");
+    expect(text).toContain("HIGHEST GRADE YIELD");
+    expect(text).toContain("Break-even score: 71.5%");
+    expect(text).toContain("Grade points locked in: +4.2");
+  });
+
+  it("escapes separators and newlines in titles", () => {
+    const text = unfold(
+      generateFocusBlockIcs(
+        block({ assignment_title: "Lab 3; part, two\nfinal" }),
+        START,
+        START,
+      ),
+    );
+    expect(text).toContain("SUMMARY:[FOCUS] CS-101: Lab 3\\; part\\, two\\nfinal");
+  });
+
+  it("folds every line to 75 octets", () => {
+    const ics = generateFocusBlockIcs(
+      block({ assignment_title: "Long ".repeat(60) }),
+      START,
+      START,
+    );
+    for (const line of ics.split("\r\n")) {
+      expect(new TextEncoder().encode(line).length).toBeLessThanOrEqual(75);
+    }
+  });
+
+  it("warns 24 hours and 2 hours before the deadline", () => {
+    const due = START + 72 * HOUR_MS;
+    const found = alarms(generateFocusBlockIcs(block(), START, START));
+    expect(found).toHaveLength(2);
+    expect(found[0]).toContain(
+      `TRIGGER;VALUE=DATE-TIME:${formatIcsUtc(new Date(due - 24 * HOUR_MS))}`,
+    );
+    expect(found[0]).toContain("ACTION:DISPLAY");
+    expect(found[0]).toContain("Apex 24h Warning: [CS-101] Binary Trees Lab");
+    expect(found[1]).toContain(
+      `TRIGGER;VALUE=DATE-TIME:${formatIcsUtc(new Date(due - 2 * HOUR_MS))}`,
+    );
+    expect(found[1]).toContain("Apex 2h Urgent Warning: [CS-101] Binary Trees Lab");
+  });
+
+  it("drops a warning that is already in the past", () => {
+    const due = new Date(START + 5 * HOUR_MS).toISOString();
+    const found = alarms(generateFocusBlockIcs(block({ due_at: due }), START, START));
+    expect(found).toHaveLength(1);
+    expect(found[0]).toContain("Apex 2h Urgent Warning");
+  });
+
+  it("sets no alarm for an overdue, imminent, undated, or unparseable deadline", () => {
+    for (const due_at of [
+      new Date(START - HOUR_MS).toISOString(),
+      new Date(START + HOUR_MS).toISOString(),
+      null,
+      "not a date",
+    ]) {
+      const ics = generateFocusBlockIcs(block({ due_at }), START, START);
+      expect(ics).not.toContain("BEGIN:VALARM");
+      expect(ics.match(/BEGIN:VEVENT/g)).toHaveLength(1);
+    }
+  });
+
+  it("prefills a Google Calendar event for the same 45 minutes", () => {
+    const url = new URL(focusBlockGoogleUrl(block(), START));
+    expect(url.origin + url.pathname).toBe("https://calendar.google.com/calendar/render");
+    expect(url.searchParams.get("action")).toBe("TEMPLATE");
+    expect(url.searchParams.get("text")).toBe("[FOCUS] CS-101: Binary Trees Lab");
+    expect(url.searchParams.get("dates")).toBe("20261019T120700Z/20261019T125200Z");
+    expect(url.searchParams.get("details")).toContain("[ ] Sketch the node API (20m)");
+  });
+
+  describe("addFocusBlockToCalendar", () => {
+    function stubBrowser(popup: { opener: unknown } | null) {
+      vi.useFakeTimers();
+      vi.setSystemTime(START + 41_500);
+      const link = { href: "", download: "", click: vi.fn(), remove: vi.fn() };
+      vi.stubGlobal("document", {
+        createElement: vi.fn(() => link),
+        body: { appendChild: vi.fn() },
+      });
+      const open = vi.fn(() => popup);
+      vi.stubGlobal("window", { open });
+      const blobs: Blob[] = [];
+      vi.spyOn(URL, "createObjectURL").mockImplementation((blob) => {
+        blobs.push(blob as Blob);
+        return "blob:focus-ics";
+      });
+      vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+      return { link, open, blobs };
+    }
+
+    it("downloads the .ics and opens the prefilled Google Calendar tab", async () => {
+      const { link, open, blobs } = stubBrowser({ opener: "page" });
+      const result = addFocusBlockToCalendar(block());
+      expect(link.download).toBe("apex-focus-block-cs-101-2026-10-19.ics");
+      expect(link.href).toBe("blob:focus-ics");
+      expect(link.click).toHaveBeenCalledOnce();
+      expect(link.remove).toHaveBeenCalledOnce();
+      expect(blobs[0].type).toBe("text/calendar;charset=utf-8");
+      expect(await blobs[0].text()).toBe(generateFocusBlockIcs(block(), START, START + 41_500));
+      expect(open).toHaveBeenCalledOnce();
+      expect(open).toHaveBeenCalledWith(focusBlockGoogleUrl(block(), START), "_blank");
+      expect(result).toEqual({ googleUrl: focusBlockGoogleUrl(block(), START), opened: true });
+    });
+
+    it("cuts the new tab's access to this page", () => {
+      const popup = { opener: "page" as unknown };
+      stubBrowser(popup);
+      addFocusBlockToCalendar(block());
+      expect(popup.opener).toBeNull();
+    });
+
+    it("still downloads and reports a blocked popup", () => {
+      const { link } = stubBrowser(null);
+      const result = addFocusBlockToCalendar(block());
+      expect(link.click).toHaveBeenCalledOnce();
+      expect(result.opened).toBe(false);
+    });
   });
 });

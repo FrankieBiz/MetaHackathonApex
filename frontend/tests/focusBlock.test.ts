@@ -4,7 +4,11 @@ import {
   type CircuitBreakerStatus,
 } from "@/lib/circuitBreaker";
 import { HOUR, gradeRisk } from "@/lib/engine";
-import { FOCUS_BLOCK_MINUTES, buildFocusBlock } from "@/lib/focusBlock";
+import {
+  FOCUS_BLOCK_MINUTES,
+  buildFocusBlock,
+  focusQueue,
+} from "@/lib/focusBlock";
 import type {
   Assignment,
   Course,
@@ -457,5 +461,72 @@ describe("buildFocusBlock with nothing to focus on", () => {
       ],
     );
     expect(buildFocusBlock(s, NOW)).toBeNull();
+  });
+});
+
+describe("focusQueue", () => {
+  const courses = [course("healthy", 95, 85), course("weak", 60, 85)];
+  const healthyWork = assignment("h1", "healthy", {
+    due_at: at(6),
+    weight: 30,
+  });
+  const weakSoon = assignment("w-soon", "weak", { due_at: at(60) });
+  const weakLate = assignment("w-late", "weak", { due_at: at(200) });
+  const desk = state(courses, [weakLate, healthyWork, weakSoon]);
+  const ids = (list: Assignment[]) => list.map((a) => a.id);
+
+  it("is the plain priority queue without a breaker", () => {
+    expect(ids(focusQueue(desk, NOW))).toEqual(["h1", "w-soon", "w-late"]);
+  });
+
+  it("leaves a halted course out of the queue entirely", () => {
+    const status = evaluateCircuitBreaker(desk);
+    expect(status.halted_course_ids).toEqual(["healthy"]);
+    expect(ids(focusQueue(desk, NOW, status))).toEqual(["w-soon", "w-late"]);
+  });
+
+  it("puts protected work ahead of higher-priority work", () => {
+    const status = breaker({ protected_assignment_ids: ["w-late"] });
+    expect(ids(focusQueue(desk, NOW, status))).toEqual([
+      "w-late",
+      "h1",
+      "w-soon",
+    ]);
+  });
+
+  it("skips deliverables with nothing left to do and keeps untriaged ones", () => {
+    const finished = assignment("done-tasks", "weak", {
+      due_at: at(10),
+      subtasks: [task("dt1", 20, { is_completed: true })],
+    });
+    const untriaged = assignment("fresh", "weak", {
+      due_at: at(80),
+      subtasks: [],
+    });
+    const queue = focusQueue(
+      state(courses, [finished, untriaged, weakLate]),
+      NOW,
+    );
+    expect(ids(queue)).toEqual(["fresh", "w-late"]);
+  });
+
+  it("starts with the deliverable buildFocusBlock chooses, at every level", () => {
+    const protectedLate = breaker({ protected_assignment_ids: ["w-late"] });
+    for (const status of [
+      undefined,
+      null,
+      evaluateCircuitBreaker(desk),
+      protectedLate,
+      breaker({ level: "LEVEL_3_HALT", halted_course_ids: ["weak"] }),
+    ]) {
+      expect(focusQueue(desk, NOW, status)[0]?.id).toBe(
+        buildFocusBlock(desk, NOW, status)?.assignment_id,
+      );
+    }
+  });
+
+  it("is empty when every open deliverable sits in a halted course", () => {
+    const status = breaker({ halted_course_ids: ["healthy"] });
+    expect(focusQueue(state(courses, [healthyWork]), NOW, status)).toEqual([]);
   });
 });
