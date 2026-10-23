@@ -57,30 +57,49 @@ export const score = (value: number | null | undefined, fallback = DASH) =>
     ? value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2)
     : fallback;
 
-export function clock(date: Date, timeZone?: string): string {
-  return new Intl.DateTimeFormat("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-    timeZone,
-  }).format(date);
+/** 06:12:33 · invalid Date, bad time zone, or non-Date input returns `fallback`. */
+export function clock(
+  date: Date,
+  timeZone?: string,
+  fallback = DASH,
+): string {
+  try {
+    return new Intl.DateTimeFormat("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+      timeZone,
+    }).format(date);
+  } catch {
+    return fallback;
+  }
 }
 
-export function shortDate(iso: string): string {
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "2-digit" })
-    .format(new Date(iso))
-    .toUpperCase();
+/** MAR 05 · unparseable ISO strings return `fallback`. */
+export function shortDate(iso: string, fallback = DASH): string {
+  try {
+    return new Intl.DateTimeFormat("en-US", { month: "short", day: "2-digit" })
+      .format(new Date(iso))
+      .toUpperCase();
+  } catch {
+    return fallback;
+  }
 }
 
-export function stamp(iso: string): string {
-  return new Intl.DateTimeFormat("en-GB", {
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  })
-    .format(new Date(iso))
-    .toUpperCase();
+/** 05 MAR, 14:07 · unparseable ISO strings return `fallback`. */
+export function stamp(iso: string, fallback = DASH): string {
+  try {
+    return new Intl.DateTimeFormat("en-GB", {
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .format(new Date(iso))
+      .toUpperCase();
+  } catch {
+    return fallback;
+  }
 }

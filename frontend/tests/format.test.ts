@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { countdown, minutes, pct, score, signed } from "@/lib/format";
+import {
+  clock,
+  countdown,
+  minutes,
+  pct,
+  score,
+  shortDate,
+  signed,
+  stamp,
+} from "@/lib/format";
 
 describe("format", () => {
   it("renders countdowns with day prefix and true minus", () => {
@@ -78,5 +87,77 @@ describe("format metric hardening", () => {
     expect(score(9.5)).toBe("9.50");
     expect(minutes(-90)).toBe("-1h 30m");
     expect(countdown(1_000)).toBe("00:00:01");
+  });
+});
+
+describe("format date/time hardening", () => {
+  describe("clock", () => {
+    it("returns the default dash for an invalid Date", () => {
+      expect(clock(new Date("invalid"))).toBe("—");
+    });
+
+    it("returns a custom fallback for an invalid Date", () => {
+      expect(clock(new Date("invalid"), undefined, "n/a")).toBe("n/a");
+    });
+
+    it("keeps an empty-string fallback instead of reverting to the dash", () => {
+      expect(clock(new Date("invalid"), undefined, "")).toBe("");
+    });
+
+    it("returns the fallback when the time zone is rejected with a RangeError", () => {
+      expect(clock(new Date(0), "Not/AZone")).toBe("—");
+    });
+
+    it("returns the fallback when the input is not a Date and formatting throws a TypeError", () => {
+      expect(clock(Symbol("corrupt") as unknown as Date)).toBe("—");
+    });
+
+    it("keeps valid output unchanged", () => {
+      expect(clock(new Date("2026-03-05T13:45:09Z"), "UTC")).toBe("13:45:09");
+    });
+  });
+
+  describe("shortDate", () => {
+    it("returns the default dash for an unparseable string", () => {
+      expect(shortDate("not-a-date")).toBe("—");
+    });
+
+    it("returns the default dash for an empty string", () => {
+      expect(shortDate("")).toBe("—");
+    });
+
+    it("returns a custom fallback for invalid input", () => {
+      expect(shortDate("not-a-date", "n/a")).toBe("n/a");
+    });
+
+    it("keeps an empty-string fallback instead of reverting to the dash", () => {
+      expect(shortDate("", "")).toBe("");
+    });
+
+    it("keeps valid output unchanged", () => {
+      expect(shortDate("2026-03-05T12:00:00")).toBe("MAR 05");
+    });
+  });
+
+  describe("stamp", () => {
+    it("returns the default dash for a corrupt string", () => {
+      expect(stamp("corrupt-date")).toBe("—");
+    });
+
+    it("returns the default dash for an empty string", () => {
+      expect(stamp("")).toBe("—");
+    });
+
+    it("returns a custom fallback for invalid input", () => {
+      expect(stamp("corrupt-date", "n/a")).toBe("n/a");
+    });
+
+    it("keeps an empty-string fallback instead of reverting to the dash", () => {
+      expect(stamp("", "")).toBe("");
+    });
+
+    it("keeps valid output unchanged", () => {
+      expect(stamp("2026-03-05T14:07:00")).toMatch(/^05 MAR,? 14:07$/);
+    });
   });
 });
