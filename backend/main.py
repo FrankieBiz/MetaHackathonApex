@@ -1,6 +1,7 @@
 """Run from the repository root: python -m uvicorn backend.main:app --port 8000."""
 
 import json
+import logging
 from contextlib import asynccontextmanager, nullcontext
 
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -45,6 +46,8 @@ from .service import (
     TerminalService,
 )
 from .syllabus_presets import SyllabusPresetDescriptor, list_presets
+
+logger = logging.getLogger(__name__)
 
 
 class _CanvasSyncBody(StrictModel):
@@ -128,6 +131,16 @@ def create_app(
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
         return response
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception(request: Request, exc: Exception) -> JSONResponse:
+        logger.exception("Unhandled exception on %s: %s", request.url.path, exc)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": "Internal server error occurred while processing terminal telemetry."
+            },
+        )
 
     @app.exception_handler(KeyError)
     async def missing_resource(request: Request, exc: KeyError) -> JSONResponse:
