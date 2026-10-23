@@ -15,6 +15,13 @@ from .models import (
 )
 
 
+def _finite_round(value: float, digits: int) -> float:
+    """Reject non-finite calculations before rounding them for the response."""
+    if not math.isfinite(value):
+        raise ValueError("Efficient frontier calculation produced a non-finite value")
+    return round(value, digits)
+
+
 def score_to_gpa(score: float) -> float:
     """Map percentage score to 4.0 academic scale."""
     if score >= 93.0:
@@ -37,7 +44,7 @@ def score_to_gpa(score: float) -> float:
         return 1.3
     if score >= 65.0:
         return 1.0
-    return max(0.0, round(score / 65.0, 2))
+    return max(0.0, _finite_round(score / 65.0, 2))
 
 
 def _course_remaining_weight(course_id: str, state: TerminalState) -> float:
@@ -59,7 +66,7 @@ def _score_delta(minutes: float, base_score: float, rem_weight: float, urgency: 
     capacity = max(0.0, 100.0 - base_score)
     tau = max(180.0, rem_weight * 900.0)
     exponent = -(urgency * minutes) / tau
-    return round(capacity * (1.0 - math.exp(exponent)), 2)
+    return _finite_round(capacity * (1.0 - math.exp(exponent)), 2)
 
 
 def _optimize_allocation(
@@ -169,7 +176,7 @@ def _optimize_allocation(
             m + 60, cd["current_score"], cd["rem_weight"], cd["urgency"]
         )
         proj_score_plus_60 = min(100.0, cd["current_score"] + score_gain_plus_60)
-        marginal_gpa_yield = round(
+        marginal_gpa_yield = _finite_round(
             (score_to_gpa(proj_score_plus_60) - score_to_gpa(proj_score))
             * (cd["credits"] / total_credits),
             3,
@@ -183,13 +190,13 @@ def _optimize_allocation(
                 course_id=c.id,
                 course_code=c.course_code,
                 course_name=c.name,
-                current_score=round(cd["current_score"], 1),
-                target_score=round(c.target_score, 1),
+                current_score=_finite_round(cd["current_score"], 1),
+                target_score=_finite_round(c.target_score, 1),
                 credit_hours=cd["credits"],
                 allocated_minutes=m,
-                allocated_hours=round(m / 60.0, 1),
-                projected_score=round(proj_score, 1),
-                score_delta=round(score_gain, 1),
+                allocated_hours=_finite_round(m / 60.0, 1),
+                projected_score=_finite_round(proj_score, 1),
+                score_delta=_finite_round(score_gain, 1),
                 marginal_gpa_yield=marginal_gpa_yield,
                 efficiency_rank=1,  # Computed below
                 status=status,
@@ -227,19 +234,19 @@ def calculate_efficient_frontier(
     current_gpas = [
         score_to_gpa(c.current_score if c.current_score is not None else 82.0) for c in courses
     ]
-    curr_portfolio_gpa = round(sum(g * 3.0 for g in current_gpas) / total_credits, 2)
+    curr_portfolio_gpa = _finite_round(sum(g * 3.0 for g in current_gpas) / total_credits, 2)
 
     # Compute optimal allocation for the requested budget
     total_minutes = int(request.weekly_hours * 60)
     optimal_allocations = _optimize_allocation(courses, state, total_minutes, request.strategy)
 
     proj_gpas = [score_to_gpa(a.projected_score) for a in optimal_allocations]
-    proj_portfolio_gpa = round(
+    proj_portfolio_gpa = _finite_round(
         sum(g * a.credit_hours for g, a in zip(proj_gpas, optimal_allocations, strict=True))
         / total_credits,
         2,
     )
-    gpa_delta = round(proj_portfolio_gpa - curr_portfolio_gpa, 2)
+    gpa_delta = _finite_round(proj_portfolio_gpa - curr_portfolio_gpa, 2)
 
     # Calculate portfolio volatility
     # Academic risk proxy: population standard deviation of projected course scores
@@ -248,8 +255,8 @@ def calculate_efficient_frontier(
     # GPA and normalized score dispersion have different units; this is not a
     # financial Sharpe estimate. The 0.01 floor bounds the zero-dispersion case.
     scores = [a.projected_score for a in optimal_allocations]
-    volatility = round(pstdev(scores) / 100.0, 3) if len(scores) > 1 else 0.05
-    sharpe = round((proj_portfolio_gpa - 2.0) / max(0.01, volatility), 2)
+    volatility = _finite_round(pstdev(scores) / 100.0, 3) if len(scores) > 1 else 0.05
+    sharpe = _finite_round((proj_portfolio_gpa - 2.0) / max(0.01, volatility), 2)
 
     # Generate benchmark points along the efficient frontier curve (5h to 40h)
     benchmark_hours = [5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0]
@@ -259,14 +266,16 @@ def calculate_efficient_frontier(
         b_minutes = int(bh * 60)
         b_allocs = _optimize_allocation(courses, state, b_minutes, request.strategy)
         b_gpas = [score_to_gpa(a.projected_score) for a in b_allocs]
-        b_pt_gpa = round(
+        b_pt_gpa = _finite_round(
             sum(g * a.credit_hours for g, a in zip(b_gpas, b_allocs, strict=True)) / total_credits,
             2,
         )
-        b_pt_score = round(sum(a.projected_score for a in b_allocs) / len(b_allocs), 1)
+        b_pt_score = _finite_round(
+            sum(a.projected_score for a in b_allocs) / max(1, len(b_allocs)), 1
+        )
         b_scores = [a.projected_score for a in b_allocs]
-        b_vol = round(pstdev(b_scores) / 100.0, 3) if len(b_scores) > 1 else 0.05
-        b_sharpe = round((b_pt_gpa - 2.0) / max(0.01, b_vol), 2)
+        b_vol = _finite_round(pstdev(b_scores) / 100.0, 3) if len(b_scores) > 1 else 0.05
+        b_sharpe = _finite_round((b_pt_gpa - 2.0) / max(0.01, b_vol), 2)
 
         curve_points.append(
             FrontierPoint(

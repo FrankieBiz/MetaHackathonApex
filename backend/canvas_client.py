@@ -54,10 +54,13 @@ def plain_text(value: str | None) -> str:
 def parse_date(value: str | None) -> datetime | None:
     if not value:
         return None
-    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    if parsed.tzinfo is None:
-        raise ValueError("Canvas returned a timestamp without a timezone")
-    return parsed.astimezone(UTC)
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            raise ValueError("Canvas returned a timestamp without a timezone")
+        return parsed.astimezone(UTC)
+    except (ValueError, TypeError, OverflowError):
+        return None
 
 
 @dataclass
@@ -259,7 +262,7 @@ class CanvasClient:
             course_code=course.course_code,
             title=raw["name"],
             due_at=parse_date(raw.get("due_at")),
-            points_possible=float(raw.get("points_possible") or 0),
+            points_possible=max(0.0, float(raw.get("points_possible") or 0)),
             description=description,
             status="completed" if completed or graded else "pending",
             graded=graded,

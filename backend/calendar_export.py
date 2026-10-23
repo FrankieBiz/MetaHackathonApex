@@ -38,7 +38,9 @@ def escape_ics_text(text: str) -> str:
     escaped = text.replace("\\", "\\\\")
     escaped = escaped.replace(";", r"\;")
     escaped = escaped.replace(",", r"\,")
-    escaped = escaped.replace("\r\n", r"\n").replace("\r", r"\n").replace("\n", r"\n")
+    # Normalize CRLF and bare CR before escaping; text must never create content lines.
+    escaped = escaped.replace("\r\n", "\n").replace("\r", "\n")
+    escaped = escaped.replace("\n", r"\n")
     return escaped
 
 
