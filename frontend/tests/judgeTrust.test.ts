@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import {
-  FERPA_BADGE,
+import DEFAULT_VISION_INGEST, {
   JUDGE_TOUR_BUTTON,
+  SANDBOX_BADGE,
   TOUR_HUD_TITLE,
   VISION_INGEST,
+  getVisionIngestCopy,
   isTourHotkey,
   tourProgress,
 } from "@/lib/judgeTrust";
+import * as judgeTrust from "@/lib/judgeTrust";
 import { TOUR_BEATS, useTourStore } from "@/store/tourStore";
 
 const press = (
@@ -24,11 +26,15 @@ const press = (
 });
 
 describe("Judge trust copy", () => {
-  it("labels the privacy badge and explains the isolation model in its tooltip", () => {
-    expect(FERPA_BADGE.label).toBe("🛡️ FERPA COMPLIANT");
-    expect(FERPA_BADGE.tooltip).toBe(
-      "Zero-retention client-side isolation; academic records never persist to public cloud",
+  it("labels the sandbox badge and states only what the client does", () => {
+    expect(SANDBOX_BADGE.label).toBe("🛡️ LOCAL SANDBOX ISOLATION");
+    expect(SANDBOX_BADGE.tooltip).toBe(
+      "Client-side ephemeral execution; course records remain local without public cloud logging",
     );
+  });
+
+  it("no longer exports the unbacked FERPA compliance claim", () => {
+    expect("FERPA_BADGE" in judgeTrust).toBe(false);
   });
 
   it("labels the one-click tour launcher and advertises its hotkey", () => {
@@ -37,15 +43,48 @@ describe("Judge trust copy", () => {
     expect(JUDGE_TOUR_BUTTON.title).toContain("Key D");
   });
 
-  it("names the vision model and the document-handling guarantee", () => {
+  it("keeps the multimodal ingest heading", () => {
     expect(VISION_INGEST.heading).toBe(
       "👁️ META LLAMA 3.2 VISION: MULTIMODAL INGEST",
     );
-    expect(VISION_INGEST.modelBadge).toBe(
-      "Model: Llama-3.2-11B-Vision-Instruct",
-    );
+  });
+
+  it("describes document handling as the configured endpoint, not local-only", () => {
     expect(VISION_INGEST.privacyBadge).toBe(
-      "Zero-leakage local document processing",
+      "Processed via configured Meta Model API endpoint",
+    );
+    expect(VISION_INGEST.privacyBadge).not.toMatch(/zero-leakage|local/i);
+  });
+
+  it("never names a model the app does not know it is running", () => {
+    expect(VISION_INGEST.modelBadge).toBe("Model: Configured Meta Provider");
+    expect(VISION_INGEST.modelBadge).not.toContain("11B");
+  });
+
+  it("exports the static fallback as the default and as VISION_INGEST", () => {
+    expect(DEFAULT_VISION_INGEST).toBe(VISION_INGEST);
+    expect(VISION_INGEST).toEqual(getVisionIngestCopy());
+  });
+
+  it("is overridden by the served model name", () => {
+    const copy = getVisionIngestCopy("LLAMA-3.3-70B");
+    expect(copy.modelBadge).toBe("Model: LLAMA-3.3-70B");
+    expect(copy.heading).toBe(VISION_INGEST.heading);
+    expect(copy.privacyBadge).toBe(VISION_INGEST.privacyBadge);
+  });
+
+  it.each([undefined, null, "", "   "])(
+    "falls back to the configured provider for %j",
+    (name) => {
+      expect(getVisionIngestCopy(name).modelBadge).toBe(
+        "Model: Configured Meta Provider",
+      );
+    },
+  );
+
+  it("trims padding around a served model name", () => {
+    expect(getVisionIngestCopy("  muse-spark-1.3 ").modelBadge).toBe(
+      "Model: muse-spark-1.3",
     );
   });
 

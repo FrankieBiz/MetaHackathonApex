@@ -21,11 +21,12 @@ import {
   formatBytes,
   type SyllabusFileKind,
 } from "@/lib/syllabus";
-import { VISION_INGEST } from "@/lib/judgeTrust";
+import { getVisionIngestCopy } from "@/lib/judgeTrust";
 import {
   LOCAL_SYLLABUS_PRESETS,
   type SyllabusPreset,
 } from "@/lib/syllabusPresets";
+import { inferencePill, useInference } from "@/store/inference";
 import { isRemote, useTerminal } from "@/store/terminal";
 
 /** Opened from the top bar and the command palette. */
@@ -118,7 +119,13 @@ function SamplePresets({
 }
 
 /** Names the vision model and the document-handling guarantee above the upload area. */
-function VisionIngestHeader() {
+export function VisionIngestHeader() {
+  // The pill's built-in default is a guess; name a model only once the engine
+  // endpoint or a run has reported one.
+  const model = useInference((s) =>
+    s.telemetry || s.configuration ? inferencePill(s).model : null,
+  );
+  const copy = getVisionIngestCopy(model);
   return (
     <section
       aria-labelledby="syllabus-vision"
@@ -129,16 +136,16 @@ function VisionIngestHeader() {
         className="text-[11px] font-semibold tracking-wider text-accent uppercase"
       >
         <span aria-hidden>[</span>
-        {VISION_INGEST.heading}
+        {copy.heading}
         <span aria-hidden>]</span>
       </h3>
       <ul className="flex flex-wrap gap-1.5 text-[10px]">
         <li className="border border-accent/50 px-1.5 py-0.5 text-accent">
-          {VISION_INGEST.modelBadge}
+          {copy.modelBadge}
         </li>
         <li className="border border-up/50 px-1.5 py-0.5 text-up">
           <span aria-hidden>🛡️ </span>
-          {VISION_INGEST.privacyBadge}
+          {copy.privacyBadge}
         </li>
       </ul>
     </section>

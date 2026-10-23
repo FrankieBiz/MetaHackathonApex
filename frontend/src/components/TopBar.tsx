@@ -51,7 +51,7 @@ import { GLOSSARY } from "@/lib/glossary";
 import { breachCount } from "@/lib/marginCall";
 import { isRemote, useTerminal } from "@/store/terminal";
 import { startTour } from "@/lib/tour";
-import { FERPA_BADGE, JUDGE_TOUR_BUTTON } from "@/lib/judgeTrust";
+import { JUDGE_TOUR_BUTTON, SANDBOX_BADGE } from "@/lib/judgeTrust";
 import { armStartupChime, playAlert } from "@/lib/feedback";
 import { armMorningBell } from "@/lib/morningBell";
 import type { ConnectionMode, Course, DataOrigin } from "@/types";
@@ -225,17 +225,17 @@ function ConnectionBadge() {
 }
 
 /** Privacy posture for judges: the tooltip states the isolation model. */
-function FerpaBadge() {
+export function SandboxBadge() {
   return (
     <div
       role="note"
       tabIndex={0}
-      aria-label={`${FERPA_BADGE.label}. ${FERPA_BADGE.tooltip}`}
-      title={FERPA_BADGE.tooltip}
+      aria-label={`${SANDBOX_BADGE.label}. ${SANDBOX_BADGE.tooltip}`}
+      title={SANDBOX_BADGE.tooltip}
       className="flex h-[22px] cursor-help items-center border border-up/50 px-1.5 text-[11px] text-up outline-none focus-visible:border-up"
     >
       <span aria-hidden>[</span>
-      {FERPA_BADGE.label}
+      {SANDBOX_BADGE.label}
       <span aria-hidden>]</span>
     </div>
   );
@@ -522,7 +522,7 @@ export function TopBar() {
           <BreakerAlarm />
           <ConnectionBadge />
           <EngineBadge />
-          <FerpaBadge />
+          <SandboxBadge />
           <Key
             active
             caps={false}

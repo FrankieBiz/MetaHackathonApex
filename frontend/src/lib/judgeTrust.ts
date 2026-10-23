@@ -3,10 +3,10 @@
  * here so the top bar, the syllabus dialog, and the tour HUD cannot drift apart.
  */
 
-export const FERPA_BADGE = {
-  label: "🛡️ FERPA COMPLIANT",
+export const SANDBOX_BADGE = {
+  label: "🛡️ LOCAL SANDBOX ISOLATION",
   tooltip:
-    "Zero-retention client-side isolation; academic records never persist to public cloud",
+    "Client-side ephemeral execution; course records remain local without public cloud logging",
 } as const;
 
 export const JUDGE_TOUR_BUTTON = {
@@ -16,11 +16,23 @@ export const JUDGE_TOUR_BUTTON = {
     "Launch the 60-second automated judge tour in one click (Key D). Esc exits.",
 } as const;
 
-export const VISION_INGEST = {
-  heading: "👁️ META LLAMA 3.2 VISION: MULTIMODAL INGEST",
-  modelBadge: "Model: Llama-3.2-11B-Vision-Instruct",
-  privacyBadge: "Zero-leakage local document processing",
-} as const;
+const UNNAMED_MODEL = "Configured Meta Provider";
+
+/**
+ * Ingest dialog copy. The model badge names the model the app was told it is
+ * running; with none known it says so instead of guessing one.
+ */
+export function getVisionIngestCopy(modelName?: string | null) {
+  return {
+    heading: "👁️ META LLAMA 3.2 VISION: MULTIMODAL INGEST",
+    modelBadge: `Model: ${modelName?.trim() || UNNAMED_MODEL}`,
+    privacyBadge: "Processed via configured Meta Model API endpoint",
+  };
+}
+
+/** Static fallback for callers that have no served model name. */
+export const VISION_INGEST = getVisionIngestCopy();
+export default VISION_INGEST;
 
 export const TOUR_HUD_TITLE = "60-SECOND META HACKATHON JUDGE TOUR";
 
