@@ -116,10 +116,10 @@ export function LaunchPad({ onOpenWorkstation, className = "" }: LaunchPadProps)
             type="button"
             data-testid="audio-briefing-button"
             onClick={openMorningBell}
-            className={`flex items-center gap-1.5 border px-3 py-1.5 font-mono text-xs font-semibold cursor-pointer transition-colors ${
+            className={`flex items-center gap-1.5 border px-3 py-1.5 font-mono text-xs font-semibold cursor-pointer transition-all duration-150 ${
               bellActive !== null
-                ? "border-accent bg-accent/20 text-accent animate-pulse"
-                : "border-line-strong bg-panel/80 text-ink hover:border-accent hover:text-accent"
+                ? "border-accent bg-accent/25 text-accent shadow-[0_0_20px_rgba(255,107,0,0.4)] animate-pulse"
+                : "border-line-strong bg-panel/80 text-ink hover:border-accent hover:text-accent hover:shadow-[0_0_12px_rgba(255,107,0,0.25)] active:scale-95"
             }`}
             title="Play 30-second spoken audio briefing of current risk floor and deliverables (hotkey B)"
           >
@@ -129,7 +129,7 @@ export function LaunchPad({ onOpenWorkstation, className = "" }: LaunchPadProps)
           <Key
             tone="accent"
             onClick={onOpenWorkstation}
-            className="flex items-center gap-2 px-3 py-1.5 font-mono text-xs font-semibold"
+            className="flex items-center gap-2 px-3 py-1.5 font-mono text-xs font-semibold shadow-sm hover:shadow-[0_0_15px_rgba(255,107,0,0.3)] transition-all"
             title="Open full Bloomberg quantitative workstation (hotkey H)"
           >
             <span>UNDER THE HOOD: FULL TERMINAL</span>
@@ -151,12 +151,15 @@ export function LaunchPad({ onOpenWorkstation, className = "" }: LaunchPadProps)
             onDragLeave={() => setDragActive(false)}
             onDrop={handleDrop}
             onClick={() => fileInputRef.current?.click()}
-            className={`flex min-h-[320px] flex-1 cursor-pointer flex-col items-center justify-center border-2 border-dashed p-6 text-center transition-all ${
+            className={`group relative flex min-h-[320px] flex-1 cursor-pointer flex-col items-center justify-center overflow-hidden border-2 border-dashed p-6 text-center transition-all duration-200 ${
               dragActive
-                ? "border-accent bg-accent/10"
-                : "border-line-strong bg-panel/40 hover:border-accent/60 hover:bg-panel/70"
+                ? "border-accent bg-accent/15 shadow-[0_0_40px_rgba(255,107,0,0.25)] scale-[1.01]"
+                : "border-line-strong bg-panel/40 hover:border-accent/60 hover:bg-panel/70 hover:shadow-[0_0_25px_rgba(255,107,0,0.12)]"
             }`}
           >
+            {dragActive && (
+              <div className="absolute inset-0 bg-gradient-to-b from-accent/10 via-transparent to-accent/10 pointer-events-none animate-pulse" />
+            )}
             <input
               ref={fileInputRef}
               type="file"
@@ -164,7 +167,7 @@ export function LaunchPad({ onOpenWorkstation, className = "" }: LaunchPadProps)
               onChange={(e) => e.target.files?.[0] && void handleFile(e.target.files[0])}
               className="hidden"
             />
-            <div className="flex flex-col items-center gap-3">
+            <div className="relative z-10 flex flex-col items-center gap-3">
               <span className="font-mono text-3xl">📄</span>
               <span className="font-mono text-sm font-bold text-ink">
                 DROP SYLLABUS (PDF, IMAGE, TXT)
@@ -172,7 +175,11 @@ export function LaunchPad({ onOpenWorkstation, className = "" }: LaunchPadProps)
               <span className="max-w-xs text-xs text-ink-3">
                 Drag a syllabus photo or rubric document here, or click to browse files.
               </span>
-              <div className="mt-2 rounded border border-line bg-canvas px-2.5 py-1 font-mono text-[10px] text-accent">
+              <div className={`mt-2 rounded border px-2.5 py-1 font-mono text-[10px] tracking-wider transition-all duration-150 ${
+                dragActive
+                  ? "border-accent bg-accent text-canvas font-bold shadow-[0_0_15px_rgba(255,107,0,0.5)]"
+                  : "border-line bg-canvas text-accent group-hover:border-accent/60 group-hover:shadow-[0_0_10px_rgba(255,107,0,0.2)]"
+              }`}>
                 POWERED BY META LLAMA 3.2 VISION
               </div>
             </div>
@@ -201,7 +208,7 @@ export function LaunchPad({ onOpenWorkstation, className = "" }: LaunchPadProps)
             <button
               type="button"
               onClick={handleLoadSample}
-              className="rounded border border-accent/40 bg-accent/10 px-3 py-1 font-mono text-xs font-bold text-accent hover:bg-accent hover:text-canvas"
+              className="rounded border border-accent/40 bg-accent/10 px-3 py-1 font-mono text-xs font-bold text-accent transition-all duration-150 hover:bg-accent hover:text-canvas hover:shadow-[0_0_15px_rgba(255,107,0,0.35)] active:scale-95"
             >
               SAMPLE SYLLABUS DEMO
             </button>
@@ -227,13 +234,13 @@ export function LaunchPad({ onOpenWorkstation, className = "" }: LaunchPadProps)
 
       {/* Visual Extraction Audit Receipt Drawer */}
       {data && data.courses && data.courses.length > 0 && (
-        <div data-testid="extraction-audit-drawer" className="rounded border border-line bg-panel/40 p-4">
+        <div data-testid="extraction-audit-drawer" className="relative rounded border border-line bg-panel/40 p-4 shadow-sm transition-all duration-200 hover:border-line-strong">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2.5">
               <span className="font-mono text-xs font-bold text-ink">
                 🧾 SYLLABUS EXTRACTION AUDIT RECEIPT
               </span>
-              <span className="rounded border border-up/40 bg-up/10 px-2 py-0.5 font-mono text-[9px] font-semibold text-up uppercase">
+              <span className="rounded border border-up/40 bg-up/10 px-2 py-0.5 font-mono text-[9px] font-semibold text-up uppercase tracking-wider">
                 Verified Conservation of Weight (Σ = 100.0%)
               </span>
               <span className="hidden sm:inline-block rounded border border-line bg-head px-2 py-0.5 font-mono text-[9px] text-ink-3">
@@ -244,7 +251,7 @@ export function LaunchPad({ onOpenWorkstation, className = "" }: LaunchPadProps)
               type="button"
               data-testid="toggle-audit-receipt"
               onClick={() => setShowAuditReceipt((prev) => !prev)}
-              className="font-mono text-xs font-bold text-accent hover:underline cursor-pointer"
+              className="font-mono text-xs font-bold text-accent hover:underline hover:text-ink cursor-pointer transition-colors"
               aria-expanded={showAuditReceipt}
             >
               {showAuditReceipt ? "HIDE AUDIT RECEIPT ▲" : "VIEW AUDIT RECEIPT ▼"}
@@ -335,17 +342,17 @@ export function LaunchPad({ onOpenWorkstation, className = "" }: LaunchPadProps)
             {topQueue.map((item, idx) => (
               <div
                 key={item.id}
-                className="flex flex-col justify-between border border-line-strong bg-panel/60 p-2.5"
+                className="group flex flex-col justify-between border border-line-strong bg-panel/60 p-2.5 transition-all duration-150 hover:border-accent/60 hover:bg-head hover:shadow-[0_0_14px_rgba(255,107,0,0.12)]"
               >
                 <div className="flex items-center justify-between text-[10px]">
-                  <span className="font-mono font-bold text-ink">{item.course_code}</span>
+                  <span className="font-mono font-bold text-ink group-hover:text-accent transition-colors">{item.course_code}</span>
                   <span className="font-mono text-ink-3">#{idx + 1}</span>
                 </div>
                 <span className="my-1.5 truncate font-mono text-[11px] text-ink">
                   {item.title}
                 </span>
                 <div className="flex items-center justify-between font-mono text-[9px] text-ink-3">
-                  <span>WT {item.weight}%</span>
+                  <span className="font-semibold text-ink-2">WT {item.weight}%</span>
                   <span>{item.points_possible} PTS</span>
                 </div>
               </div>

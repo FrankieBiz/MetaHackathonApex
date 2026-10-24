@@ -191,6 +191,77 @@
   outline-offset: 2px;
 }
 
+/* -------------------------------------------------- score shock slider */
+
+.score-shock-range {
+  appearance: none;
+  height: 20px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.score-shock-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--color-accent) 0%,
+    var(--color-accent) var(--shock-pct, 0%),
+    var(--color-line-strong) var(--shock-pct, 0%),
+    var(--color-line-strong) 100%
+  );
+  box-shadow: 0 0 10px rgba(255, 107, 0, 0.2);
+}
+
+.score-shock-range::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--color-accent) 0%,
+    var(--color-accent) var(--shock-pct, 0%),
+    var(--color-line-strong) var(--shock-pct, 0%),
+    var(--color-line-strong) 100%
+  );
+  box-shadow: 0 0 10px rgba(255, 107, 0, 0.2);
+}
+
+.score-shock-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 2px;
+  border: 1px solid var(--color-accent);
+  background: var(--color-ink);
+  box-shadow: 0 0 8px var(--color-accent);
+  transition: transform 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+}
+
+.score-shock-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  border: 1px solid var(--color-accent);
+  background: var(--color-ink);
+  box-shadow: 0 0 8px var(--color-accent);
+  transition: transform 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+}
+
+.score-shock-range:hover::-webkit-slider-thumb,
+.score-shock-range:active::-webkit-slider-thumb {
+  transform: scale(1.2);
+  background: var(--color-accent);
+  box-shadow: 0 0 14px var(--color-accent);
+}
+
+.score-shock-range:hover::-moz-range-thumb,
+.score-shock-range:active::-moz-range-thumb {
+  transform: scale(1.2);
+  background: var(--color-accent);
+  box-shadow: 0 0 14px var(--color-accent);
+}
+
 /* ------------------------------------------------------------- triage log */
 
 @keyframes log-line {

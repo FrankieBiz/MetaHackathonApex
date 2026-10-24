@@ -97,8 +97,11 @@ export function FocusBlockCard({
     <div
       data-testid="focus-block-card"
       data-tour="focus-card"
-      className={`flex flex-col border border-accent/40 bg-head/90 p-5 shadow-2xl backdrop-blur-sm ${className}`}
+      className={`relative flex flex-col border border-accent/50 bg-head/95 p-5 shadow-[0_0_35px_-5px_rgba(255,107,0,0.18)] backdrop-blur-sm transition-all duration-300 hover:border-accent/70 hover:shadow-[0_0_45px_-5px_rgba(255,107,0,0.25)] ${className}`}
     >
+      {/* Top ambient highlight line */}
+      <div className="absolute inset-x-0 -top-px h-[2px] bg-gradient-to-r from-transparent via-accent to-transparent opacity-80" />
+
       {/* Eyebrow & Badges */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line pb-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -202,29 +205,30 @@ export function FocusBlockCard({
             max={100}
             step={5}
             value={scoreShock ?? 0}
+            style={{ ["--shock-pct" as string]: `${scoreShock ?? 0}%` }}
             onChange={(e) => setScoreShock(Number(e.target.value))}
-            className="h-1.5 w-full cursor-pointer appearance-none bg-line-strong accent-accent"
+            className="score-shock-range w-full"
             aria-label="Hypothetical deliverable score slider"
           />
           <div className="flex shrink-0 items-center gap-1 font-mono text-[10px]">
             <button
               type="button"
               onClick={() => setScoreShock(0)}
-              className="border border-line bg-head px-1.5 py-0.5 hover:border-accent hover:text-accent cursor-pointer"
+              className="border border-line bg-head px-1.5 py-0.5 hover:border-accent hover:text-accent hover:shadow-[0_0_8px_rgba(255,107,0,0.25)] transition-all cursor-pointer"
             >
               0%
             </button>
             <button
               type="button"
               onClick={() => setScoreShock(85)}
-              className="border border-line bg-head px-1.5 py-0.5 hover:border-accent hover:text-accent cursor-pointer"
+              className="border border-line bg-head px-1.5 py-0.5 hover:border-accent hover:text-accent hover:shadow-[0_0_8px_rgba(255,107,0,0.25)] transition-all cursor-pointer"
             >
               85%
             </button>
             <button
               type="button"
               onClick={() => setScoreShock(100)}
-              className="border border-line bg-head px-1.5 py-0.5 hover:border-accent hover:text-accent cursor-pointer"
+              className="border border-line bg-head px-1.5 py-0.5 hover:border-accent hover:text-accent hover:shadow-[0_0_8px_rgba(255,107,0,0.25)] transition-all cursor-pointer"
             >
               100%
             </button>
@@ -274,10 +278,10 @@ export function FocusBlockCard({
         <button
           type="button"
           onClick={handleCalendar}
-          className={`flex items-center justify-center gap-1.5 border px-3 py-2.5 font-mono text-xs font-bold tracking-wider uppercase transition-all cursor-pointer ${
+          className={`flex items-center justify-center gap-1.5 border px-3 py-2.5 font-mono text-xs font-bold tracking-wider uppercase transition-all duration-150 cursor-pointer ${
             calendarAdded
-              ? "border-up bg-up/20 text-up"
-              : "border-accent bg-accent/20 text-accent hover:bg-accent hover:text-canvas"
+              ? "border-up bg-up/20 text-up shadow-[0_0_15px_rgba(0,255,102,0.3)]"
+              : "border-accent bg-accent/20 text-accent hover:bg-accent hover:text-canvas hover:shadow-[0_0_20px_rgba(255,107,0,0.35)] active:scale-[0.98]"
           }`}
         >
           <span>{calendarAdded ? "✓ ADDED TO CALENDAR (.ICS + GOOGLE)" : "📅 ADD 45-MIN BLOCK TO CALENDAR"}</span>
@@ -285,10 +289,10 @@ export function FocusBlockCard({
         <button
           type="button"
           onClick={handleWhatsApp}
-          className={`flex items-center justify-center gap-1.5 border px-3 py-2.5 font-mono text-xs font-bold tracking-wider uppercase transition-all cursor-pointer ${
+          className={`flex items-center justify-center gap-1.5 border px-3 py-2.5 font-mono text-xs font-bold tracking-wider uppercase transition-all duration-150 cursor-pointer ${
             whatsAppDispatched
-              ? "border-up bg-up/20 text-up"
-              : "border-emerald-500/60 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-black"
+              ? "border-up bg-up/20 text-up shadow-[0_0_15px_rgba(0,255,102,0.3)]"
+              : "border-emerald-500/60 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-black hover:shadow-[0_0_20px_rgba(16,185,129,0.4)] active:scale-[0.98]"
           }`}
         >
           <span>{whatsAppDispatched ? "✓ WHATSAPP OPENED" : "💬 DISPATCH TO WHATSAPP"}</span>
