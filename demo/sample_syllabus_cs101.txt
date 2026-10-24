@@ -1,0 +1,20 @@
+CS 101: Introduction to Computer Systems & Data Structures
+Term: Fall 2026
+Instructor: Prof. Alan Turing (turing@apex.edu)
+Office Hours: Mon/Wed 2:00 PM - 4:00 PM
+
+Course Description:
+This course introduces the fundamental principles of computer systems, memory management,
+algorithmic data structures, and concurrent programming.
+
+Grading Policy (Strict Breakdown Sum = 100%):
+- Binary Trees Lab: 15% (100 pts)
+  Rubric: Pointer allocation (25 pts), In-order traversal invariant (35 pts), Node deletion edge cases (40 pts)
+- Problem Set 4 (Recurrences): 10% (50 pts)
+  Rubric: Master theorem analysis (25 pts), Inductive proof writeup (25 pts)
+- Midterm Examination: 25% (100 pts)
+  Rubric: Memory architectures, virtual addressing, cache hierarchy
+- Concurrent Sorting Project: 20% (100 pts)
+  Rubric: Thread pool implementation (40 pts), Mutex lock-free queue (30 pts), Benchmark throughput (30 pts)
+- Final Examination: 30% (150 pts)
+  Rubric: Comprehensive cumulative systems evaluation
