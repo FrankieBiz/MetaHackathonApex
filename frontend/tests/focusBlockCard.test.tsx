@@ -41,6 +41,7 @@ const mockFocusBlock: FocusBlock = {
   break_even_score: 75.0,
   points_locked_in: 1.88,
   downside_floor: 82.5,
+  assignment_weight: 20,
   total_minutes: 45,
   tasks: [
     {
@@ -148,5 +149,64 @@ describe("FocusBlockCard", () => {
     expect(container.textContent).toContain("Break-Even Score");
     expect(container.textContent).toContain("Grade Points Locked In");
     expect(container.textContent).toContain("Downside Floor (VaR)");
+  });
+
+  it("dynamically adjusts downside floor when score shock presets are clicked", async () => {
+    await render(<FocusBlockCard focusBlock={mockFocusBlock} />);
+    const metric = container.querySelector('[data-testid="downside-floor-metric"]');
+    expect(metric?.textContent).toContain("≥82.5%");
+
+    // Click 100% preset button
+    const preset100 = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "100%"
+    );
+    expect(preset100).toBeDefined();
+
+    await act(async () => {
+      preset100?.click();
+    });
+
+    // With weight = 20 (exposure = 0.20), floor = 82.5 + 100 * 0.20 = 100% (capped at 100)
+    expect(metric?.textContent).toContain("≥100.0%");
+    expect(container.textContent).toContain("simulated @ 100% shock");
+
+    // Click Reset
+    const resetBtn = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Reset"
+    );
+    expect(resetBtn).toBeDefined();
+    await act(async () => {
+      resetBtn?.click();
+    });
+    expect(metric?.textContent).toContain("≥82.5%");
+  });
+
+  it("dispatches to WhatsApp with formatted task checklist and metrics", async () => {
+    const handleWhatsApp = vi.fn();
+    const openSpy = vi.fn();
+    vi.stubGlobal("open", openSpy);
+
+    await render(
+      <FocusBlockCard focusBlock={mockFocusBlock} onDispatchWhatsApp={handleWhatsApp} />
+    );
+
+    const waBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("DISPATCH TO WHATSAPP")
+    );
+    expect(waBtn).toBeDefined();
+
+    await act(async () => {
+      waBtn?.click();
+    });
+
+    expect(handleWhatsApp).toHaveBeenCalledTimes(1);
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    const openedUrl = openSpy.mock.calls[0][0] as string;
+    expect(openedUrl).toContain("https://wa.me/?text=");
+    const decodedUrl = decodeURIComponent(openedUrl);
+    expect(decodedUrl).toContain("CS 3801");
+    expect(decodedUrl).toContain("Raft Consensus Implementation");
+    expect(decodedUrl).toContain("Break-Even Required: 75.0%");
+    expect(container.textContent).toContain("WHATSAPP OPENED");
   });
 });

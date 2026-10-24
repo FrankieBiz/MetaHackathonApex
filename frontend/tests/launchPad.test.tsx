@@ -120,4 +120,54 @@ describe("LaunchPad", () => {
     await render(<LaunchPad onOpenWorkstation={vi.fn()} />);
     expect(container.textContent).toContain("ALL DELIVERABLES EXECUTED");
   });
+
+  it("triggers 30s audio briefing when audio button is clicked", async () => {
+    await render(<LaunchPad onOpenWorkstation={vi.fn()} />);
+    const audioBtn = container.querySelector('[data-testid="audio-briefing-button"]') as HTMLButtonElement | null;
+    expect(audioBtn).not.toBeNull();
+    expect(audioBtn?.textContent).toContain("30s AUDIO BRIEFING");
+
+    await act(async () => {
+      audioBtn?.click();
+    });
+
+    const { useMorningBell } = await import("@/components/MorningBell");
+    expect(useMorningBell.getState().open).toBe(true);
+  });
+
+  it("toggles visual extraction audit receipt drawer with category weights verified", async () => {
+    await render(<LaunchPad onOpenWorkstation={vi.fn()} />);
+    const drawer = container.querySelector('[data-testid="extraction-audit-drawer"]');
+    expect(drawer).not.toBeNull();
+    expect(drawer?.textContent).toContain("SYLLABUS EXTRACTION AUDIT RECEIPT");
+
+    // Drawer is closed by default
+    expect(drawer?.textContent).not.toContain("CS-101 · Introduction to Computer Science");
+
+    // Toggle open
+    const toggleBtn = container.querySelector('[data-testid="toggle-audit-receipt"]') as HTMLButtonElement | null;
+    expect(toggleBtn).not.toBeNull();
+
+    await act(async () => {
+      toggleBtn?.click();
+    });
+
+    expect(drawer?.textContent).toContain("CS-101 · Introduction to Computer Science");
+    expect(drawer?.textContent).toContain("Σ 100.0% ✓ VERIFIED");
+    expect(drawer?.textContent).toContain("Binary Trees Lab");
+    expect(drawer?.textContent).toContain("Syllabus Source Excerpt");
+
+    // Toggle close
+    await act(async () => {
+      toggleBtn?.click();
+    });
+    expect(drawer?.textContent).not.toContain("CS-101 · Introduction to Computer Science");
+  });
+
+  it("displays portfolio course balance and congestion status on priority rail", async () => {
+    await render(<LaunchPad onOpenWorkstation={vi.fn()} />);
+    const badge = container.querySelector('[data-testid="congestion-badge"]');
+    expect(badge).not.toBeNull();
+    expect(badge?.textContent).toContain("BALANCED ACROSS 1 COURSES · 0 CONGESTION PILE-UPS");
+  });
 });

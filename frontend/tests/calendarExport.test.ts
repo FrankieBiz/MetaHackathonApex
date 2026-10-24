@@ -191,6 +191,7 @@ describe("focus block calendar export", () => {
     break_even_score: 71.5,
     points_locked_in: 4.2,
     downside_floor: 63.75,
+    assignment_weight: 20,
     total_minutes: 45,
     tasks: [
       { id: "t1", title: "Sketch the node API", estimated_minutes: 20, is_completed: false },

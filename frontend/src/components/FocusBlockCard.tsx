@@ -1,15 +1,46 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { FocusBlock } from "@/lib/focusBlock";
 import { addFocusBlockToCalendar } from "@/lib/calendarExport";
+import { whatsappShareUrl } from "@/lib/marginCall";
 import { pct, signed } from "@/lib/format";
 import { useTerminal } from "@/store/terminal";
+
+export function formatFocusBlockWhatsApp(
+  block: FocusBlock,
+  shockScore?: number | null,
+): string {
+  const taskList = block.tasks
+    .map((t, idx) => `${idx + 1}. [ ] ${t.title} (${t.estimated_minutes}m)`)
+    .join("\n");
+  const lines = [
+    `🎯 APEX 45-MIN FOCUS BLOCK · ${block.course_code}`,
+    `Deliverable: ${block.assignment_title}`,
+    block.due_at
+      ? `Deadline: ${new Date(block.due_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
+      : null,
+    "",
+    `• Break-Even Required: ${block.break_even_score !== null ? `${block.break_even_score.toFixed(1)}%` : "N/A"}`,
+    `• Points Locked In: +${block.points_locked_in.toFixed(2)} pts`,
+    `• Downside Floor (VaR 90%): ≥${block.downside_floor !== null ? `${block.downside_floor.toFixed(1)}%` : "N/A"}${
+      shockScore !== null && shockScore !== undefined ? ` (Simulated @ ${shockScore}%)` : ""
+    }`,
+    "",
+    `Actionable Sprint (${block.total_minutes}m):`,
+    taskList,
+    "",
+    `Policy: ${block.policy_reason}`,
+    "— Dispatched from Apex OS Local Sandbox",
+  ].filter(Boolean);
+  return lines.join("\n");
+}
 
 interface FocusBlockCardProps {
   focusBlock: FocusBlock;
   onToggleTask?: (taskId: string) => void;
   onAddToCalendar?: () => void;
+  onDispatchWhatsApp?: () => void;
   className?: string;
 }
 
@@ -17,11 +48,24 @@ export function FocusBlockCard({
   focusBlock,
   onToggleTask,
   onAddToCalendar,
+  onDispatchWhatsApp,
   className = "",
 }: FocusBlockCardProps) {
   const [calendarAdded, setCalendarAdded] = useState(false);
+  const [whatsAppDispatched, setWhatsAppDispatched] = useState(false);
+  const [scoreShock, setScoreShock] = useState<number | null>(null);
   const studentMode = useTerminal((s) => s.studentMode);
   const toggle = useTerminal((s) => s.toggle);
+
+  const weight = focusBlock.assignment_weight ?? 20;
+  const exposure = Math.min(Math.max(weight, 0), 100) / 100;
+
+  const effectiveFloor = useMemo(() => {
+    if (scoreShock === null || focusBlock.downside_floor === null) {
+      return focusBlock.downside_floor;
+    }
+    return Math.min(100, Math.max(0, focusBlock.downside_floor + (scoreShock * exposure)));
+  }, [focusBlock.downside_floor, scoreShock, exposure]);
 
   const handleToggle = (taskId: string, isCompleted: boolean) => {
     if (onToggleTask) {
@@ -36,6 +80,17 @@ export function FocusBlockCard({
     setCalendarAdded(true);
     if (onAddToCalendar) onAddToCalendar();
     setTimeout(() => setCalendarAdded(false), 4000);
+  };
+
+  const handleWhatsApp = () => {
+    const text = formatFocusBlockWhatsApp(focusBlock, scoreShock);
+    const url = whatsappShareUrl(text);
+    if (typeof window !== "undefined") {
+      window.open(url, "_blank");
+    }
+    setWhatsAppDispatched(true);
+    if (onDispatchWhatsApp) onDispatchWhatsApp();
+    setTimeout(() => setWhatsAppDispatched(false), 4000);
   };
 
   return (
@@ -101,15 +156,79 @@ export function FocusBlockCard({
         </div>
 
         <div className="flex flex-col">
-          <span className="font-mono text-2xl font-black tabular-nums text-ink">
-            {focusBlock.downside_floor !== null ? `≥${pct(focusBlock.downside_floor)}` : "—"}
+          <span
+            data-testid="downside-floor-metric"
+            className={`font-mono text-2xl font-black tabular-nums ${
+              scoreShock !== null ? "text-accent" : "text-ink"
+            }`}
+          >
+            {effectiveFloor !== null ? `≥${pct(effectiveFloor)}` : "—"}
           </span>
           <span className="text-[10px] font-medium text-ink-2">
             {studentMode ? "Grade Floor Protected" : "Downside Floor (VaR)"}
           </span>
           <span className="text-[9px] text-ink-3">
-            1-in-10 worst-case scenario
+            {scoreShock !== null ? `simulated @ ${scoreShock}% shock` : "1-in-10 worst-case scenario"}
           </span>
+        </div>
+      </div>
+
+      {/* Interactive Score Shock Simulator */}
+      <div className="mb-4 rounded border border-line bg-panel/60 p-3">
+        <div className="flex items-center justify-between text-[10px] uppercase">
+          <span className="font-mono font-bold text-ink">
+            {studentMode ? "Tactile Score Shock" : "Stress Test: Score Shock Simulator"}
+          </span>
+          <div className="flex items-center gap-1.5 font-mono text-[10px]">
+            <span className="text-ink-3">Hypothetical Score:</span>
+            <span className="font-bold text-accent">
+              {scoreShock !== null ? `${scoreShock}%` : "Worst Case (0%)"}
+            </span>
+            {scoreShock !== null && (
+              <button
+                type="button"
+                onClick={() => setScoreShock(null)}
+                className="ml-1 text-[9px] text-ink-3 underline hover:text-ink cursor-pointer"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="mt-2 flex items-center gap-3">
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={5}
+            value={scoreShock ?? 0}
+            onChange={(e) => setScoreShock(Number(e.target.value))}
+            className="h-1.5 w-full cursor-pointer appearance-none bg-line-strong accent-accent"
+            aria-label="Hypothetical deliverable score slider"
+          />
+          <div className="flex shrink-0 items-center gap-1 font-mono text-[10px]">
+            <button
+              type="button"
+              onClick={() => setScoreShock(0)}
+              className="border border-line bg-head px-1.5 py-0.5 hover:border-accent hover:text-accent cursor-pointer"
+            >
+              0%
+            </button>
+            <button
+              type="button"
+              onClick={() => setScoreShock(85)}
+              className="border border-line bg-head px-1.5 py-0.5 hover:border-accent hover:text-accent cursor-pointer"
+            >
+              85%
+            </button>
+            <button
+              type="button"
+              onClick={() => setScoreShock(100)}
+              className="border border-line bg-head px-1.5 py-0.5 hover:border-accent hover:text-accent cursor-pointer"
+            >
+              100%
+            </button>
+          </div>
         </div>
       </div>
 
@@ -150,19 +269,29 @@ export function FocusBlockCard({
         </div>
       </div>
 
-      {/* 1-Click Calendar Button */}
-      <div className="mt-5 pt-3">
+      {/* Action Buttons: Calendar + WhatsApp */}
+      <div className="mt-5 grid grid-cols-1 gap-2.5 sm:grid-cols-2 pt-3">
         <button
           type="button"
           onClick={handleCalendar}
-          className={`flex w-full items-center justify-center gap-2 border px-4 py-2.5 font-mono text-xs font-bold tracking-wider uppercase transition-all ${
+          className={`flex items-center justify-center gap-1.5 border px-3 py-2.5 font-mono text-xs font-bold tracking-wider uppercase transition-all cursor-pointer ${
             calendarAdded
               ? "border-up bg-up/20 text-up"
               : "border-accent bg-accent/20 text-accent hover:bg-accent hover:text-canvas"
           }`}
         >
           <span>{calendarAdded ? "✓ ADDED TO CALENDAR (.ICS + GOOGLE)" : "📅 ADD 45-MIN BLOCK TO CALENDAR"}</span>
-          <span className="text-[10px] opacity-75">(WITH 24H & 2H ALARMS)</span>
+        </button>
+        <button
+          type="button"
+          onClick={handleWhatsApp}
+          className={`flex items-center justify-center gap-1.5 border px-3 py-2.5 font-mono text-xs font-bold tracking-wider uppercase transition-all cursor-pointer ${
+            whatsAppDispatched
+              ? "border-up bg-up/20 text-up"
+              : "border-emerald-500/60 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-black"
+          }`}
+        >
+          <span>{whatsAppDispatched ? "✓ WHATSAPP OPENED" : "💬 DISPATCH TO WHATSAPP"}</span>
         </button>
       </div>
     </div>

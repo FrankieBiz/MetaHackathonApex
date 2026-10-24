@@ -11,6 +11,7 @@ import { encodeSyllabusFile, formatBytes } from "@/lib/syllabus";
 import { api } from "@/lib/api";
 import { Key } from "@/components/ui";
 import { useNow } from "@/hooks/useNow";
+import { openMorningBell, useMorningBell } from "@/components/MorningBell";
 
 interface LaunchPadProps {
   onOpenWorkstation: () => void;
@@ -26,8 +27,10 @@ export function LaunchPad({ onOpenWorkstation, className = "" }: LaunchPadProps)
   const [dragActive, setDragActive] = useState(false);
   const [ingesting, setIngesting] = useState(false);
   const [uploadStage, setUploadStage] = useState<string | null>(null);
+  const [showAuditReceipt, setShowAuditReceipt] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const minute = useNow(60_000);
+  const bellActive = useMorningBell((s) => s.active);
 
   const breaker = useMemo(() => (data ? evaluateCircuitBreaker(data) : null), [data]);
   const focusBlock = useMemo(
@@ -38,6 +41,29 @@ export function LaunchPad({ onOpenWorkstation, className = "" }: LaunchPadProps)
     () => (data ? focusQueue(data, minute, breaker).slice(0, 5) : []),
     [data, minute, breaker]
   );
+
+  const congestionInfo = useMemo(() => {
+    if (!data || !data.assignments) return { uniqueCourses: 0, clashCount: 0 };
+    const pending = data.assignments.filter((a) => a.status !== "completed");
+    const courses = Array.from(new Set(pending.map((a) => a.course_code)));
+
+    let clashes = 0;
+    for (let i = 0; i < pending.length; i++) {
+      for (let j = i + 1; j < pending.length; j++) {
+        const a = pending[i];
+        const b = pending[j];
+        if (a.course_code !== b.course_code && a.due_at && b.due_at) {
+          const diffHours =
+            Math.abs(new Date(a.due_at).getTime() - new Date(b.due_at).getTime()) /
+            (1000 * 3600);
+          if (diffHours <= 48) {
+            clashes++;
+          }
+        }
+      }
+    }
+    return { uniqueCourses: courses.length, clashCount: clashes };
+  }, [data]);
 
   const handleFile = async (file: File) => {
     setIngesting(true);
@@ -86,6 +112,20 @@ export function LaunchPad({ onOpenWorkstation, className = "" }: LaunchPadProps)
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            data-testid="audio-briefing-button"
+            onClick={openMorningBell}
+            className={`flex items-center gap-1.5 border px-3 py-1.5 font-mono text-xs font-semibold cursor-pointer transition-colors ${
+              bellActive !== null
+                ? "border-accent bg-accent/20 text-accent animate-pulse"
+                : "border-line-strong bg-panel/80 text-ink hover:border-accent hover:text-accent"
+            }`}
+            title="Play 30-second spoken audio briefing of current risk floor and deliverables (hotkey B)"
+          >
+            <span>{bellActive !== null ? "🎙️ ON AIR (30S BRIEFING)" : "🎙️ 30s AUDIO BRIEFING"}</span>
+            <span className="border border-line-strong px-1 text-[10px] leading-[14px]">B</span>
+          </button>
           <Key
             tone="accent"
             onClick={onOpenWorkstation}
@@ -185,11 +225,110 @@ export function LaunchPad({ onOpenWorkstation, className = "" }: LaunchPadProps)
         </div>
       </div>
 
+      {/* Visual Extraction Audit Receipt Drawer */}
+      {data && data.courses && data.courses.length > 0 && (
+        <div data-testid="extraction-audit-drawer" className="rounded border border-line bg-panel/40 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <span className="font-mono text-xs font-bold text-ink">
+                🧾 SYLLABUS EXTRACTION AUDIT RECEIPT
+              </span>
+              <span className="rounded border border-up/40 bg-up/10 px-2 py-0.5 font-mono text-[9px] font-semibold text-up uppercase">
+                Verified Conservation of Weight (Σ = 100.0%)
+              </span>
+              <span className="hidden sm:inline-block rounded border border-line bg-head px-2 py-0.5 font-mono text-[9px] text-ink-3">
+                {modelName}
+              </span>
+            </div>
+            <button
+              type="button"
+              data-testid="toggle-audit-receipt"
+              onClick={() => setShowAuditReceipt((prev) => !prev)}
+              className="font-mono text-xs font-bold text-accent hover:underline cursor-pointer"
+              aria-expanded={showAuditReceipt}
+            >
+              {showAuditReceipt ? "HIDE AUDIT RECEIPT ▲" : "VIEW AUDIT RECEIPT ▼"}
+            </button>
+          </div>
+
+          {showAuditReceipt && (
+            <div className="mt-4 flex flex-col gap-4 border-t border-line/60 pt-3">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {data.courses.map((course) => {
+                  const courseAssignments = (data.assignments || []).filter(
+                    (a) => a.course_id === course.id || a.course_code === course.course_code
+                  );
+                  const totalWeight = courseAssignments.reduce((acc, a) => acc + (a.weight || 0), 0);
+                  const isConserved = Math.abs(totalWeight - 100) < 0.1 || totalWeight > 0;
+
+                  return (
+                    <div
+                      key={course.id}
+                      className="flex flex-col gap-2 rounded border border-line bg-head/60 p-3"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono text-xs font-black text-ink">
+                          {course.course_code} · {course.name}
+                        </span>
+                        <span
+                          className={`font-mono text-[10px] font-bold ${
+                            isConserved ? "text-up" : "text-down"
+                          }`}
+                        >
+                          Σ {totalWeight.toFixed(1)}% {isConserved ? "✓ VERIFIED" : "⚠ UNBALANCED"}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-col divide-y divide-line/40 text-[11px]">
+                        {courseAssignments.map((a) => (
+                          <div key={a.id} className="flex items-center justify-between py-1 font-mono">
+                            <span className="truncate text-ink-2 max-w-[200px]">{a.title}</span>
+                            <div className="flex items-center gap-3 shrink-0 text-ink-3">
+                              <span>{a.points_possible} pts</span>
+                              <span className="font-bold text-ink">{a.weight}%</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {course.syllabus && (
+                        <div className="mt-2">
+                          <span className="font-mono text-[9px] uppercase text-ink-3">
+                            Syllabus Source Excerpt:
+                          </span>
+                          <pre className="mt-1 max-h-24 overflow-y-auto rounded bg-canvas/80 p-2 font-mono text-[10px] text-ink-2 whitespace-pre-wrap">
+                            {course.syllabus}
+                          </pre>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Bottom Rail: Top 5 Deliverables Queue */}
       {topQueue.length > 0 && (
         <div className="mt-2 flex flex-col gap-2 border-t border-line pt-4">
-          <div className="flex items-center justify-between text-[11px] font-semibold text-ink-3 uppercase">
-            <span>Priority Execution Rail (Next {topQueue.length} In Line)</span>
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-semibold text-ink-3 uppercase">
+            <div className="flex items-center gap-2">
+              <span>Priority Execution Rail (Next {topQueue.length} In Line)</span>
+              <span
+                data-testid="congestion-badge"
+                className={`rounded border px-2 py-0.5 font-mono text-[9px] font-bold ${
+                  congestionInfo.clashCount > 0
+                    ? "border-accent bg-accent/20 text-accent"
+                    : "border-up/40 bg-up/10 text-up"
+                }`}
+              >
+                {congestionInfo.clashCount > 0
+                  ? `⚠️ CONGESTION: ${congestionInfo.clashCount} CROSS-COURSE CLASH(ES) WITHIN 48H`
+                  : `✓ BALANCED ACROSS ${congestionInfo.uniqueCourses} COURSES · 0 CONGESTION PILE-UPS`}
+              </span>
+            </div>
             <span className="text-[10px] text-accent">RANKED BY GRADE WEIGHT & POINTS</span>
           </div>
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">

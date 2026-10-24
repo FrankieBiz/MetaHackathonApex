@@ -35,6 +35,7 @@ export interface FocusBlock {
   points_locked_in: number;
   /** Course grade left if this deliverable scored zero, other work held at the current grade. */
   downside_floor: number | null;
+  assignment_weight: number;
   total_minutes: number;
   tasks: FocusBlockTask[];
   policy_reason: string;
@@ -191,6 +192,7 @@ export function buildFocusBlock(
     points_locked_in:
       planMinutes > 0 ? (assignment.weight * totalMinutes) / planMinutes : 0,
     downside_floor: current === null ? null : current * (1 - exposure),
+    assignment_weight: assignment.weight,
     total_minutes: totalMinutes,
     tasks,
     policy_reason,
