@@ -9,6 +9,15 @@
 
 It has a FastAPI backend (`backend/`) and a Next.js 16 terminal (`frontend/`) laid out as a Bloomberg-style drag-and-drop grid. The whole system runs without a Canvas account, so judges can try it in under a minute.
 
+### 🛡️ Why Apex OS is Not an "AI Chatbot" (Anti-Project Defense)
+
+The Meta Hackathon rules explicitly prohibit generic *"simple 'AI for Education' Chatbots"*, basic RAG wrappers, and generic prompt tools. Apex OS rejects the chatbot paradigm entirely:
+
+1. **Zero Conversational Chat**: There is no chat bar, prompt box, or hallucinated tutoring dialog.
+2. **Deterministic Financial Math**: 1000-Path Monte Carlo Value-at-Risk (`scipy.stats`), Markowitz Efficient Frontier quadratic optimization (`scipy.optimize`), and Margin Call restoration sequences.
+3. **Institutional Execution Workstation**: Modeled after a Bloomberg Terminal with keyboard shortcuts, order book priority ranking, dynamic what-if stress testing, and RFC 5545 calendar export.
+4. **Structured Meta Intelligence**: Meta models (`muse-spark-1.3`, `muse-spark-open-1026`) are strictly employed as deterministic structured extractors and agentic planners that decompose syllabi and rubrics into atomic 15–45 min tasks with Pydantic v2 schemas and strict validation.
+
 ## 60-second quickstart
 
 You need Node.js 20.9+ (24 is tested) and either [uv](https://docs.astral.sh/uv/) or Python 3.12+. You don't need a Canvas token, model server, or database.
@@ -206,7 +215,7 @@ legacy_archive/       Original Vite + Express workspace that predates the termin
 
 ## Meta inference telemetry
 
-Set server-only `META_API_KEY` to enable Meta Model API. `META_BASE_URL` defaults to `https://api.meta.ai/v1`; `META_MODEL` defaults to `muse-spark-1.3` and also accepts `Llama-3.3-70B-Instruct`, `Llama-3.1-8B-Instruct`, a Llama 4 model, `muse-wonder`, or any other model ID served by your endpoint. Model availability depends on the deployment; configure an endpoint serving the requested version. Meta's [compatibility configuration example](https://dev.meta.ai/llama/resources/cookbook/documentlens) documents the base URL. Existing `LLM_*` settings continue to work without a Meta key.
+Set server-only `META_API_KEY` to enable Meta Model API. `META_BASE_URL` defaults to `https://api.meta.ai/v1`; `META_MODEL` defaults to `muse-spark-1.3` and also accepts `meta-models/muse-spark-open-1026` (Baseten), `muse-glimmer`, `muse-wonder`, or any other Meta model ID served by your endpoint. Model availability depends on the deployment; configure an endpoint serving the requested version. Meta's [compatibility configuration example](https://dev.meta.ai/llama/resources/cookbook/documentlens) documents the base URL. Existing `LLM_*` settings continue to work without a Meta key.
 
 `POST /api/decompose` (also `/decompose`) accepts `{ "assignment_id": "..." }` and returns `subtasks`, `source`, and `telemetry: { model_used, latency_ms, prompt_tokens, completion_tokens, tokens_per_sec }`. Throughput is completion tokens divided by full API round-trip seconds, including request and prefill latency. Unreported usage is `null` and appears as `—`; local starter plans and saved plans are explicitly labeled rather than presented as model inference. Measurements stay in browser memory and are excluded from persisted course and task data. The legacy triage route keeps its array response for existing clients.
 
