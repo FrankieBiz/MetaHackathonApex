@@ -18,9 +18,24 @@ class Settings(BaseSettings):
     llm_base_url: str = "http://localhost:11434/v1"
     llm_api_key: SecretStr = SecretStr("ollama")
     llm_model: str = "llama3"
-    meta_api_key: SecretStr = SecretStr("")
-    meta_base_url: str = "https://api.meta.ai/v1"
-    meta_model: str = "muse-spark-1.3"
+    meta_api_key: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias=AliasChoices(
+            "META_API_KEY", "LLAMA_API_KEY", "META_LLAMA_API_KEY", "LLAMA_STACK_API_KEY"
+        ),
+    )
+    meta_base_url: str = Field(
+        default="https://api.meta.ai/v1",
+        validation_alias=AliasChoices(
+            "META_BASE_URL", "LLAMA_BASE_URL", "META_LLAMA_BASE_URL", "LLAMA_STACK_BASE_URL"
+        ),
+    )
+    meta_model: str = Field(
+        default="muse-spark-1.3",
+        validation_alias=AliasChoices(
+            "META_MODEL", "LLAMA_MODEL", "META_LLAMA_MODEL", "LLAMA_STACK_MODEL"
+        ),
+    )
     # Optional fast pre-filter that audits rubric constraints before the primary plan.
     auditor_api_key: SecretStr = Field(
         default=SecretStr(""), validation_alias=AliasChoices("AUDITOR_API_KEY", "DEEPSEEK_API_KEY")

@@ -265,10 +265,28 @@ def configuration_audit(sources: Sources) -> dict:
             isinstance(node, ast.AnnAssign)
             and isinstance(node.target, ast.Name)
             and node.target.id in {"meta_model", "meta_base_url", "llm_model"}
-            and isinstance(node.value, ast.Constant)
-            and isinstance(node.value.value, str)
         ):
-            defaults[node.target.id] = node.value.value
+            if isinstance(node.value, ast.Constant) and isinstance(
+                node.value.value, str
+            ):
+                defaults[node.target.id] = node.value.value
+            elif isinstance(node.value, ast.Call):
+                for kw in node.value.keywords:
+                    if kw.arg == "default":
+                        if isinstance(kw.value, ast.Constant) and isinstance(
+                            kw.value.value, str
+                        ):
+                            defaults[node.target.id] = kw.value.value
+                        elif (
+                            isinstance(kw.value, ast.Call)
+                            and kw.value.args
+                            and isinstance(kw.value.args[0], ast.Constant)
+                        ):
+                            defaults[node.target.id] = str(kw.value.args[0].value)
+                if node.target.id not in defaults and node.value.args:
+                    arg0 = node.value.args[0]
+                    if isinstance(arg0, ast.Constant) and isinstance(arg0.value, str):
+                        defaults[node.target.id] = arg0.value
     drift = []
     readme = sources.text.get("README.md", "")
     for match in re.finditer(

@@ -435,6 +435,7 @@ function Tape() {
     );
   }, [data, metrics]);
 
+  const workstationOpen = useTerminal((s) => s.workstationOpen);
   const count = (data?.courses.length ?? 0) + 4;
   return (
     <div className="flex h-6 border-b border-line bg-canvas text-[11px] whitespace-nowrap">
@@ -449,7 +450,10 @@ function Tape() {
       >
         <div
           className="tape flex w-max"
-          style={{ ["--tape-duration" as string]: `${count * 7}s` }}
+          style={{
+            ["--tape-duration" as string]: `${count * 7}s`,
+            animationPlayState: workstationOpen ? "running" : "paused",
+          }}
         >
           <div className="flex">{items}</div>
           <div className="flex" aria-hidden>
@@ -588,48 +592,61 @@ export function TopBar() {
           >
             + SYLLABUS
           </Key>
-          <Key
-            caps={false}
-            onClick={() => setMonteCarloOpen(true)}
-            title="Monte Carlo what-if desk: final-grade quantiles, 90% value at risk, leverage ranking, and score shocks"
-            aria-label="Open the Monte Carlo what-if and value-at-risk desk"
+          {/* Quantitative Desks Cluster */}
+          <div
+            className="flex items-center gap-1 border-x border-line-strong/60 px-1.5 py-0.5 bg-surface/40"
+            role="group"
+            aria-label="Quantitative analytical desks"
           >
-            WHAT-IF // VaR
-          </Key>
-          <Key
-            onClick={() => setDossierOpen(true)}
-            title="Academic standing dossier: executive memo and audit metrics (hotkey R)"
-            aria-label="Open the academic standing dossier"
-          >
-            DOSSIER // MEMO
-          </Key>
-          <Key
-            onClick={() => useCalendarExport.getState().setOpen(true)}
-            title="Academic Calendar export: download RFC 5545 .ics schedule or copy live webcal:// feed (hotkey C)"
-            aria-label="Open calendar export desk"
-          >
-            CAL // .ICS
-          </Key>
-          <Key
-            onClick={() => useEfficientFrontier.getState().setOpen(true)}
-            title="Academic Efficient Frontier & Pareto study hour allocator (hotkey E)"
-            aria-label="Open academic efficient frontier"
-          >
-            FRONTIER
-          </Key>
-          <Key
-            tone={breaches ? "down" : "default"}
-            onClick={() => setMarginCallOpen(true)}
-            title={`Margin call desk: breached courses, restoration order, and a WhatsApp alert preview (hotkey M)${
-              breaches
-                ? ` · ${breaches} course${breaches === 1 ? "" : "s"} under target`
-                : ""
-            }`}
-            aria-label={`Open the margin call desk${breaches ? `, ${breaches} courses under target` : ""}`}
-          >
-            MARGIN CALL
-            {breaches > 0 && <span className="ml-1">● {breaches}</span>}
-          </Key>
+            <span
+              className="hidden lg:inline text-[9px] font-semibold tracking-wider text-ink-3 uppercase mr-0.5 select-none"
+              aria-hidden
+            >
+              DESKS:
+            </span>
+            <Key
+              caps={false}
+              onClick={() => setMonteCarloOpen(true)}
+              title="Monte Carlo what-if desk: final-grade quantiles, 90% value at risk, leverage ranking, and score shocks"
+              aria-label="Open the Monte Carlo what-if and value-at-risk desk"
+            >
+              WHAT-IF // VaR
+            </Key>
+            <Key
+              onClick={() => setDossierOpen(true)}
+              title="Academic standing dossier: executive memo and audit metrics (hotkey R)"
+              aria-label="Open the academic standing dossier"
+            >
+              DOSSIER // MEMO
+            </Key>
+            <Key
+              onClick={() => useCalendarExport.getState().setOpen(true)}
+              title="Academic Calendar export: download RFC 5545 .ics schedule or copy live webcal:// feed (hotkey C)"
+              aria-label="Open calendar export desk"
+            >
+              CAL // .ICS
+            </Key>
+            <Key
+              onClick={() => useEfficientFrontier.getState().setOpen(true)}
+              title="Academic Efficient Frontier & Pareto study hour allocator (hotkey E)"
+              aria-label="Open academic efficient frontier"
+            >
+              FRONTIER
+            </Key>
+            <Key
+              tone={breaches ? "down" : "default"}
+              onClick={() => setMarginCallOpen(true)}
+              title={`Margin call desk: breached courses, restoration order, and a WhatsApp alert preview (hotkey M)${
+                breaches
+                  ? ` · ${breaches} course${breaches === 1 ? "" : "s"} under target`
+                  : ""
+              }`}
+              aria-label={`Open the margin call desk${breaches ? `, ${breaches} courses under target` : ""}`}
+            >
+              MARGIN CALL
+              {breaches > 0 && <span className="ml-1">● {breaches}</span>}
+            </Key>
+          </div>
           <Key
             onClick={() => setTokenOpen(true)}
             aria-label="Configure Canvas API token"
